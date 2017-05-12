@@ -22,13 +22,15 @@
 #define Factor_ZC   0.25      // Zero Crossing rate reference factor
 #define Factor_RSL  7
 #define StartWindow 20
+
 #define _SSID "zekefi-interno"  // network name
 #define _NETPASS "JtXDF5jK79es" // network password    
+
 #define REF_VAR false            // indicate if reference are variables or fixed values
 
+int WifiPin = D7;     // wifi status LED
+int AccPin = D6;      // accelerometer data readings LED
 
-int WifiPin=D7;
-int AccPin = D6;
 typedef float REAL;
 typedef short SIGNAL;
 
@@ -114,6 +116,7 @@ const int timeZone = -3;
 
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
+
 QuickStats stats; //initialize an instance of this class
 
 
@@ -339,7 +342,7 @@ void loop()
 
     float CAVshort = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, 25)*1000; // Mag(acc) short term media
     CAV = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, SAMPLES) * 1000; // Mag(acc)  long term media
-    RSL = (CAVshort / 25) / (CAV / SAMPLES) * 100; // con
+    RSL = (CAVshort) / (CAV) * 100; // con
     stats.bubbleSort(AccNetnow, SAMPLES);
     float Q1 = AccNetnow[SAMPLES / 4 - 1];
     float Q3 = AccNetnow[SAMPLES / 4 * 3 - 1];
