@@ -2,81 +2,106 @@
 #include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <Wire.h>
+#include <Filters.h>
 #include <SparkFun_MMA8452Q.h> // Includes the SFE_MMA8452Q library
 #include <ESP8266HTTPClient.h>
+#include "QuickStats.h"
 
 
-#define SAMPLES 200  // samples number
-#define N_WIN 2      // Windwos 
-#define ID  1  // #1 device number
-#define OFFSET_DIGITAL false
+#define SAMPLES 200              // samples number
+#define N_WIN 2                  // Windwos 
+#define ID  1                    // #1 device number
+#define TRNM 10UL                // Parameter in between windwos time in min
+#define TRST 20                  // Start parameter windwos in secs
+#define TRNS 40                  // Sample windows time in secs
+#define TASD 20                  // time after send data in secs
+#define TWC 1                    // time Wifi check
+#define Factor_IQR  4.0          // Interquarile reference factor
+#define Factor_CAV  7            // Cumulative acelerator vector reference factor
+#define Factor_ACN  3.0          // Aceleration magnitude reference factor
+#define Factor_ZC   0.25         // Zero Crossing rate reference factor
+#define Factor_RSL  7            // Mr. P reference factor
+#define StartWindow 20
+#define _SSID "zekefi-interno"   // network name
+#define _NETPASS "JtXDF5jK79es"  // network password    
+#define REF_VAR false            // indicate if reference are variables or fixed values
 
-//int DRINTPin = 4;   // accelerometer data ready interrupt
-//int LEDPin = LED_BUILTIN;   // server data ok
+
+int WifiPin = D7;     // wifi status LED
+int AccPin = D6;      // accelerometer data readings LED
+
+typedef float REAL;
+typedef short SIGNAL;
+
+typedef struct
+{
+  int windowSize;
+  int sampleRate;
+} ZeroCross;
+
+/* one pole filter variables */
+float testFrequency = 1;                     // test signal frequency (Hz)
+float testAmplitude = 100;                   // test signal amplitude
+float testOffset = 100;
+FilterOnePole filterOneHighpassX;
+FilterOnePole filterOneHighpassY;
+FilterOnePole filterOneHighpassZ;
 
 /* Sampling freq */
-const int FrecRPS = 100; // Tasa de muestreo definida por el usuario (100 a 200)
-// numer of windows for sampling
+#define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
 unsigned int INTERVALO = (1000 / FrecRPS); // ms
-volatile unsigned long tiempo;
-volatile int sample;   // accerelometer sample index
+
+/* time variables */
+time_t tiempo;        // ?
+time_t startSampling; // when a new simpling windwow start
+time_t eventStart;    // when a calculation windwos start
+time_t windowStart;   // ?
+time_t startTime;     // time after setup() if finished
+time_t parameterLap;  // time between reference recalculation
+time_t sendTime;      // when an event start
+time_t wifiLap;       // counter time for wifi check
 
 /* accelerometer parameters and variables  */
+int sample;   // accerelometer sample index
 MMA8452Q accel;
-int amp = 1000;           // set data to mg
-volatile unsigned long offset_x, offset_y, offset_z; // offset data for normalization
-volatile short old_x, old_y, old_z;  // old acceleration data
-short ACC_sample[3];      // [0] = x_acc [1] = y_acc [z] = z_acc
-short AccNetnow[SAMPLES]; // net acceleration
+long offset_x, offset_y, offset_z; // offset data for normalization
+short old_x, old_y, old_z;         // old acceleration data for normalization
+short ACC_sample[3];              // [0] = x_acc [1] = y_acc [z] = z_acc
+float AccNetnow[SAMPLES]; // net acceleration
 short acc_x[SAMPLES];     // x-axis acceleration array
 short acc_y[SAMPLES];     // x-axis acceleration array
 short acc_z[SAMPLES];     // x-axis acceleration array
 short acc_xMax;           // x-axis max acceleration
 short acc_yMax;           // y-axis max acceleration
 short acc_zMax;           // z-axis max acceleration
-short AccNetnowMax;       // max net acceleration
-volatile short mag_t;              // sample number of aceleration magnitude
-volatile short x_t;                // sample number of aceleration x-axis
-volatile short y_t;                // sample number of aceleration y-axis
-volatile short z_t;                // sample number of aceleration z-axis
-
-#define TRNM 30   // Parameter in between windwos time in min
-#define TRST 40   // Start parameter windwos in secs
-#define TRNS 10   // Sample windows time in secs
-#define Factor_IQR  4
-#define Factor_CAV  7
-#define Factor_ACN  3
-#define Factor_ZC   0.75
-#define StartWindow 20 //
-
-volatile short IQRmax;  // maximun value Interquiarlie
-volatile short IQRmin;  // minimun value Interquiarlie
-volatile short CAVmax;  // maximun value Cumulative aceleration vector
-volatile short CAVmin;  // minimun value Cumulative aceleration vector
-volatile short ACNmax;  // maximun value ?
-volatile short ACNmin;  // minimun value ?
-volatile short ZCmax;   // maximun value Zero crossing
-volatile short ZCmin;   // minimun value Zero crossing
-volatile short RSL;     //
-volatile short IQR;    // Interquiarlie value
-volatile short ZC;     // each axis Zero crossing sum value
-volatile short CAV;    // Cumulative Acceleration vector value
-volatile short RSLref;     //
-volatile short IQRref;    // Interquiarlie value reference
-volatile short ZCref;     // each axis Zero crossing sum reference
-volatile short CAVref;    // Cumulative Acceleration vector reference
-volatile short ACNref;    // Cumulative Acceleration vector reference
-
-volatile int startSampling = 0; // when the digital clock was displayed
-volatile time_t eventStart;
-time_t windowStart;
+float AccNetnowMax;       // max net acceleration
+short mag_t;              // sample number of aceleration magnitude
+short x_t;                // sample number of aceleration x-axis
+short y_t;                // sample number of aceleration y-axis
+short z_t;                // sample number of aceleration z-axis
+float IQRmax;  // maximun value Interquiarlie
+float IQRmin;  // minimun value Interquiarlie
+short CAVmax;  // maximun value Cumulative aceleration vector
+short CAVmin;  // minimun value Cumulative aceleration vector
+float ACNmax;  // maximun value ?
+float ACNmin;  // minimun value ?
+short ZCmax;   // maximun value Zero crossing
+short ZCmin;   // minimun value Zero crossing
+float RSL;     //
+float IQR;    // Interquiarlie value
+short ZC;     // each axis media Zero crossing porcentaje entre 0-100
+short ZC_test;
+short CAV;    // Cumulative Acceleration vector value
+float RSLref;     //
+float IQRref;    // Interquiarlie value reference
+short ZCref;     // each axis Zero crossing sum reference
+short CAVref;    // Cumulative Acceleration vector reference
+float ACNref;    // Cumulative Acceleration vector reference
 
 
-time_t startSecond;
-time_t parameterLap;
 /* AP settings */
-char ssid[] = "zekefi-interno";  //  your network SSID (name)
-char pass[] = "JtXDF5jK79es";       // your network password
+char ssid[] = _SSID;  //  your network SSID (name)
+char pass[] = _NETPASS;       // your network password
 
 /* NTP parameters and NTP Servers: */
 static const char ntpServerName[] = "us.pool.ntp.org";
@@ -84,19 +109,20 @@ static const char ntpServerName[] = "us.pool.ntp.org";
 //static const char ntpServerName[] = "time-a.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
-
 const int timeZone = -3;
-//const int timeZone = -5;  // Eastern Standard Time (USA)
-//const int timeZone = -4;  // Eastern Daylight Time (USA)
-//const int timeZone = -8;  // Pacific Standard Time (USA)
-//const int timeZone = -7;  // Pacific Daylight Time (USA)
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
+QuickStats stats; //initialize an instance of this class
 
-time_t acc_time;
+
 
 void setup()
 {
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(WifiPin, OUTPUT);
+  pinMode(AccPin, OUTPUT);
+
   Serial.begin(115200);
   // Wire.begin(int sda, int scl)
   Wire.begin(4, 5);       // join i2c bus (address optional for master)
@@ -111,7 +137,9 @@ void setup()
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
+    digitalWrite(WifiPin, LOW);
   }
+  digitalWrite(WifiPin, HIGH);
   Serial.println("");
 
   Serial.print("IP number assigned by DHCP is ");
@@ -134,221 +162,377 @@ void setup()
     delay(5000);
   }
   Serial.print("MMA8452Q setup complete !");
-  pinMode(LED_BUILTIN, OUTPUT);
   //  pinMode(DRINTPin, INPUT_PULLUP);
   //  attachInterrupt(digitalPinToInterrupt(DRINTPin), DRAcc_ISR , RISING);
 
   /* setup init values */
-
   for (int k = 0; k < SAMPLES ; k++) {
     AccNetnow[k] = 0;
     acc_x[k] = 0;
     acc_y[k] = 0;
     acc_z[k] = 0;
   }
+  RSLref = 0;
+  IQRref = 100.00;    // Interquiarlie value reference
+  ZCref = 100;     // each axis Zero crossing sum reference
+  CAVref = 200;    // Cumulative Acceleration vector reference
+  ACNref = 100;
+  IQRmax = 0.0;
+  IQRmin = 0.0;
+  CAVmax = 0;
+  CAVmin = 0;
+  ACNmax = 0;
+  ACNmin = 0;
+  ZCmax = 0;
+  ZCmin = 0;
+
   offset_x = 0;
   offset_y = 0;
   offset_z = 0;
   sample = 0;
-  parameterLap = 0;
-  startSecond = second();
+
+  parameterLap = now();
+  startTime = now();
+  sendTime = now();
+  wifiLap = now();
+
+  filterOneHighpassX.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a o:qne pole (RC) highpass filter
+  filterOneHighpassY.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
+  filterOneHighpassZ.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
+
 }
 
 
 void loop()
 {
-  if (timeStatus() != timeNotSet) {
-    //update the display only if time has changed
-    if ((now()) != startSampling && sample == SAMPLES) {
-      digitalWrite(LED_BUILTIN, LOW);
-      startSampling = now();
 
+  //update the display only if time has changed
+  if ((now()) != startSampling && sample == SAMPLES) {
+    digitalWrite(AccPin, LOW);
+    startSampling = now();
+    eventStart = millis();
+    /* All over again */
+    sample = 0;
+    IQRmax = 0.0;
+    IQRmin = 0.0;
+    CAVmax = 0;
+    CAVmin = 0;
+    ACNmax = 0;
+    ACNmin = 0;
+    ZCmax = 0;
+    ZCmin = 0;
 
-      eventStart = millis();
-
-
-
-
-      /*
-            Serial.print(AccNetnowMax);
-            Serial.print(" ");
-
-            Serial.print(" ");
-            Serial.print(acc_xMax);
-            Serial.print(" ");
-
-            Serial.print(" ");
-            Serial.print(acc_yMax);
-            Serial.print(" ");
-
-            Serial.print(" ");
-            Serial.print(acc_zMax);
-
-            Serial.print(" ");
-            Serial.print(cav);
-
-            Serial.print(" ");
-            Serial.print(iqr);
-
-            Serial.print(" ");
-            Serial.println(zcr);
-
-
-            Serial.print("   Event calc time ");
-            Serial.print(millis() - eventStart);
-            Serial.println(" ms");
-      */
-      /* All over again */
-      sample = 0;
-      time_t windowEnd = millis() - windowStart;
+    time_t windowEnd = millis() - windowStart;
+    /*
       Serial.print("   Widow sampling time ");
       Serial.print(windowEnd);
       Serial.println("   ms ");
-      windowStart = millis();
+    */
+    windowStart = millis();
 
-     
+
+  }
+
+  /* paramater calcs at first TRST seconds */
+  if ((now() - startTime) == TRST) {
+    calc_ref();
+    print_ref();
+    digitalClockDisplay();
+  }
+
+
+  /* parameter calcs every TRNM minutes */
+
+  if ((now() - parameterLap) == SECS_PER_MIN * TRNM) {
+    parameterLap = now();
+    calc_ref();
+    print_ref();
+    digitalClockDisplay();
+  }
+
+  if ((now() - wifiLap) == SECS_PER_MIN * TWC) {
+    wifiLap = now();
+    /* wait until wifi is connected*/
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+      digitalWrite(WifiPin, LOW);
     }
+    digitalWrite(WifiPin, HIGH);
+    Serial.println("");
+  }
 
-    /* paramater calcs every TRNM */
-    if ( (minute() - parameterLap) == TRNM || (second() - startSecond) ==  TRST) {
-      parameterLap = minute();
-      IQRref = (IQRmax - IQRmin) * Factor_IQR;
-      CAVref = (CAVmax - CAVmin) * Factor_CAV;
-      ACNref = (ACNmax - ACNmin) *Factor_ACN;
-      ZCref = (ZCmax - ZCmin)* Factor_ZC;  //float ?
-    }
+  accel.readRaw();
 
+  filterOneHighpassX.input(accel.x);
+  filterOneHighpassY.input(accel.y);
+  filterOneHighpassZ.input(accel.z);
 
-    /* read values at sampling rate */
-    if (millis() - tiempo >= INTERVALO) {
-      tiempo = millis();
+  /* read values at sampling rate */
+  if (millis() - tiempo >= INTERVALO) {
+    tiempo = millis();
+    digitalWrite(AccPin, HIGH);
+    /*
       accel.readRaw();
 
       acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
       acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
       acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
+    */
+    acc_x[sample] = 0.5 * (filterOneHighpassX.output() - offset_x) + 0.5 * old_x;
+    acc_y[sample] = 0.5 * (filterOneHighpassY.output() - offset_y) + 0.5 * old_y;
+    acc_z[sample] = 0.5 * (filterOneHighpassZ.output() - offset_z) + 0.5 * old_z;
 
-      AccNetnow[sample] = sqrt(acc_x[sample] * acc_x[sample] + acc_y[sample] * acc_y[sample] + acc_z[sample] * acc_z[sample]);
+    AccNetnow[sample] = sqrt(acc_x[sample] * acc_x[sample] + acc_y[sample] * acc_y[sample] + acc_z[sample] * acc_z[sample]);
 
-      if ( sample == 0) {
-        acc_xMax = abs(acc_x[sample]);
-        acc_yMax = abs(acc_y[sample]);
-        acc_zMax = abs(acc_z[sample]);
-        AccNetnowMax = AccNetnow[sample];
+    if ( sample == 0) {
+      acc_xMax = abs(acc_x[sample]);
+      acc_yMax = abs(acc_y[sample]);
+      acc_zMax = abs(acc_z[sample]);
+      AccNetnowMax = AccNetnow[sample];
 
-      }
-      short acc_xabs = abs(acc_x[sample]);
-      short acc_yabs = abs(acc_y[sample]);
-      short acc_zabs = abs(acc_z[sample]);
+    }
+    short acc_xabs = abs(acc_x[sample]);
+    short acc_yabs = abs(acc_y[sample]);
+    short acc_zabs = abs(acc_z[sample]);
 
-      /* finds max aceleration values */
+    /* finds max aceleration values */
 
-      if (AccNetnow[sample]  > ACNmax) {
-        ACNmax = AccNetnow[sample];
-        acc_time = millis();
-        mag_t = sample;
-      }
-        if (AccNetnow[sample] <= ACNmin) {
-        ACNmin = AccNetnow[sample];
-      }
+    if (AccNetnow[sample]  > ACNmax) {
+      ACNmax = AccNetnow[sample];
+      mag_t = sample;
+    }
+    if (AccNetnow[sample] <= ACNmin) {
+      ACNmin = AccNetnow[sample];
+    }
 
-      if (acc_xabs > acc_xMax) {
-        acc_xMax =  acc_xabs;
-      }
-      if (acc_yabs > acc_yMax) {
-        acc_yMax = acc_yabs;
-      }
-      if (acc_zabs > acc_zMax) {
-        acc_zMax = acc_zabs;
-      }
+    if (acc_xabs > acc_xMax) {
+      acc_xMax =  acc_xabs;
+    }
+    if (acc_yabs > acc_yMax) {
+      acc_yMax = acc_yabs;
+    }
+    if (acc_zabs > acc_zMax) {
+      acc_zMax = acc_zabs;
+    }
 
-      
-      /*
-          Serial.print(now());
-          Serial.print(" ");
-          Serial.print(sample);
-          Serial.print(" ");
-          Serial.print(acc_x[sample]);
-          Serial.print(" ");
-          Serial.print(acc_y[sample]);
-          Serial.print(" ");
-          Serial.print(acc_z[sample]);
-          Serial.print(" ");
-          Serial.println(AccNetnow[sample]);
-         
-      */
-      old_x = acc_x[sample];
-      old_y = acc_y[sample];
-      old_z = acc_z[sample];
+    print_acc_values();
 
-      sample++;
+    old_x = acc_x[sample];
+    old_y = acc_y[sample];
+    old_z = acc_z[sample];
+
 
     /* Sampling end */
 
-    /* Parameter cals */ 
-    
-      short cavshort = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, 25); // Mag(acc) short term media
-      CAV = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, SAMPLES); // Mag(acc)  long term media
-      RSL = (cavshort / 25) / (CAV / SAMPLES); //
-      sort(AccNetnow, SAMPLES);
-      short Q1 = AccNetnow[SAMPLES / 4 - 1];
-      short Q3 = AccNetnow[SAMPLES * 3 / 4 - 1];
-      IQR = Q3 - Q1;   // IQR
-      ZC = zeroCrossingNum(acc_x, SAMPLES) + zeroCrossingNum(acc_y, SAMPLES) + zeroCrossingNum(acc_z, SAMPLES);
+    /* Parameter cals */
 
-      if (IQR > IQRmax) {
-        IQRmax = IQR;
-      }
-      if (IQR <= IQRmin) {
-        IQRmin = IQR;
-      }
-      if (ZC > ZCmax) {
-        ZCmax = ZC;
-      }
-      if (ZC <= ZCmin) {
-        ZCmin = ZC;
-      }
-      if (CAV > CAVmax) {
-        ZCmax = ZC;
-      }
-      if (CAV <= CAVmin) {
-        CAVmin = CAV;        
-      }
+    float CAVshort = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, 25) * 1000; // Mag(acc) short term media
+    CAV = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, SAMPLES); // Mag(acc)  long term media
+    RSL = (CAVshort / 25) / (CAV / SAMPLES); //
+    stats.bubbleSort(AccNetnow, SAMPLES);
+    float Q1 = AccNetnow[SAMPLES / 4 - 1];
+    float Q3 = AccNetnow[SAMPLES * 3 / 4 - 1];
+    IQR = Q3 - Q1;   // IQR
+    ZC = int((zeroCrossingRate(acc_x, SAMPLES) + zeroCrossingRate(acc_y, SAMPLES) + zeroCrossingRate(acc_z, SAMPLES)) * 100 / 3);
 
-     if(IQR > IQRref || ZC < ZCref || CAV > CAVref)
-     sendPost(ID, now(), ACNmax, mag_t, acc_xMax , acc_yMax, acc_zMax, ZC, IQR);
-  
+    if (IQR > IQRmax) {
+      IQRmax = IQR;
+    }
+    if (IQR <= IQRmin) {
+      IQRmin = IQR;
+    }
+    if (ZC > ZCmax) {
+      ZCmax = ZC;
+    }
+    if (ZC <= ZCmin) {
+      ZCmin = ZC;
+    }
+    if (CAV > CAVmax) {
+      ZCmax = ZC;
+    }
+    if (CAV <= CAVmin) {
+      CAVmin = CAV;
+    }
+
+    sample++;
+
+    //  print_ref();
+    //  print_results();
+
+    digitalWrite(LED_BUILTIN, LOW);
+    //    if ((now() - sendTime >= TASD) && (IQR > IQRref && ZC > ZCref && CAV > CAVref  && RSLref)) {
+    if ((now() - sendTime >= TASD) && (IQR > IQRref || ZC > ZCref || CAV > CAVref || RSL <= RSLref || ACNmax >= ACNref)) {
+      digitalClockDisplay();
+      sendTime = now();
+      sendPost(ID, now(), ACNmax, mag_t, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
     }
   }
 }
+
 
 void DRAcc_ISR () {
 
 }
 
 
+void print_parameter() {
+  Serial.print("IQR ");
+  Serial.print("\t");
+  Serial.print(IQR);
+  Serial.print("\t");
+  Serial.print("CAV ");
+  Serial.print("\t");
+  Serial.print(CAV);
+  Serial.print("\t");
+  Serial.print("ZC");
+  Serial.print("\t");
+  Serial.print(ZC);
+  Serial.print("\t");
+  Serial.print("ACNmax ");
+  Serial.print("\t");
+  Serial.print(ACNmax);
+  Serial.print("\t");
+  Serial.print("RSL");
+  Serial.print("\t");
+  Serial.println(RSL);
+
+}
+
+void print_parameter_raw() {
+
+  Serial.print(IQR);
+  Serial.print(" ");
+  Serial.print(CAV);
+  Serial.print(" ");
+  Serial.print(ZC);
+  Serial.print(" ");
+  Serial.println(ACNmax);
+
+}
+void print_acc_values() {
+  Serial.print("x-axis ");
+  Serial.print("\t");
+  Serial.print(acc_x[sample]);
+  Serial.print("\t");
+  Serial.print("y-axis ");
+  Serial.print("\t");
+  Serial.print(acc_y[sample]);
+  Serial.print("\t");
+  Serial.print("z-axis ");
+  Serial.print("\t");
+  Serial.print(acc_z[sample]);
+  Serial.print("\t");
+  Serial.print("Net acceleration ");
+  Serial.print("\t");
+  Serial.println(AccNetnow[sample]);
+}
+void print_acc_values_raw() {
+
+  Serial.print(acc_x[sample]);
+  Serial.print(" ");
+  Serial.print(acc_y[sample]);
+  Serial.print(" ");
+  Serial.print(acc_z[sample]);
+  Serial.print(" ");
+  Serial.println(AccNetnow[sample]);
+}
+
+void restore_parameters() {
+  IQRmax = 0;
+  IQRmin = 0;
+  CAVmax = 0;
+  CAVmin = 0;
+  ACNmax = 0;
+  ACNmin = 0;
+  ZCmax = 0;
+  ZCmin = 0;
+
+}
+
+void calc_ref() {
+  if ( REF_VAR == true) {
+    IQRref = (IQRmax - IQRmin) * Factor_IQR;
+    CAVref = (CAVmax - CAVmin) * Factor_CAV;
+    ACNref = (ACNmax - ACNmin) * Factor_ACN;
+    ZCref = ZCmax - ZCmin * Factor_ACN;
+    RSLref = (RSLref - RSLref) * Factor_RSL;
+  } else {
+    ACNref = (ACNmax - ACNmin) * Factor_ACN;
+    IQRref = 5000;
+    CAVref = 10000;
+    RSLref = 145;
+    ZCref = 30;
+  }
+}
+void print_ref_raw() {
+
+  Serial.print(IQRref);
+  Serial.print(" ");
+  Serial.print(CAVref);
+  Serial.print(" ");
+  Serial.print(ZCref);
+  Serial.print(" ");
+  Serial.println(ACNref);
+}
+void print_ref() {
+  Serial.print("IQRref ");
+  Serial.print("\t");
+  Serial.print(IQRref);
+  Serial.print("\t");
+  Serial.print("CAVref ");
+  Serial.print("\t");
+  Serial.print(CAVref);
+  Serial.print("\t");
+  Serial.print("ZCref ");
+  Serial.print("\t");
+  Serial.print(ZCref);
+  Serial.print("\t");
+  Serial.print("ACNref ");
+  Serial.print("\t");
+  Serial.print(ACNref);
+  Serial.print("\t");
+  Serial.print("RSLref ");
+  Serial.print("\t");
+  Serial.println(ACNref);
+
+
+}
 
 short cummulativeMeasureAmplitud (short _buffer[], int _size, int _id) {
   int b = _size - 1;
   int a = _size - _id;
 
-  short f_x;
-  for (int i = b; i >= a; i--) {
+  short f_x = 0;
+  for (int i = b; i < _size; i++) {
     f_x += _buffer[i];
   }
   return f_x;
 }
 
+float cummulativeMeasureAmplitud (float _buffer[], int _size, int _id) {
+  int b = _size;
+  int a = _size - _id;
+
+  float f_x = 0;
+  for (int i = a; i < b; i++) {
+    f_x += _buffer[i];
+  }
+  return f_x / float (_size);
+}
+
 void offset(int samples) {
   int j = 1;
+
   while (j < samples) {
-    if (accel.available()) {
-      accel.read();
+    if (millis() - tiempo >= INTERVALO) {
+      accel.readRaw();
       offset_x += accel.x;
       offset_y += accel.y;
       offset_z += accel.z;
       j++;
     }
+
   }
   offset_x = offset_x / samples;
   offset_y = offset_y / samples;
@@ -356,6 +540,102 @@ void offset(int samples) {
 
 }
 
+//------------------------------------------------------------------------------
+// Computes the absolute difference between two given samples. Used to determine
+// a change in sign in the zero crossing rate estimator.
+//------------------------------------------------------------------------------
+REAL absdif(REAL x, REAL y)
+{
+  REAL r = x - y;
+  if (r < 0)
+  {
+    return -1 * r;
+  }
+  else
+  {
+    return r;
+  }
+}
+//------------------------------------------------------------------------------
+// Indicates the sign of the sample. -1 = -ve, +1 = +ve
+//------------------------------------------------------------------------------
+REAL sgn( REAL sample )
+{
+  if ( sample < 0 )
+  {
+    return -1;
+  }
+  else
+  {
+    return 1;
+  }
+}
+//------------------------------------------------------------------------------
+// Returns the absolute (positive) value of a given sample.
+//------------------------------------------------------------------------------
+REAL getabs( REAL val )
+{
+  if ( val < 0 )
+  {
+    return -1 * val;
+  }
+  else
+  {
+    return val;
+  }
+}
+
+//------------------------------------------------------------------------------
+// Computes the zero crossing rate estimator of a given input buffer. This
+// input can be pre-processed with a lowpass filter to increase robustness to
+// noise.
+//------------------------------------------------------------------------------
+REAL zeroCross(SIGNAL* input, int length, int sampleRate)
+{
+  int i;
+
+  // interpolate crossings
+  int firstCross = -1;
+  int lastCross = -1;
+  float iLeft;
+  float iRight;
+
+  int count = 0;
+  REAL sgn0 = sgn(input[0]);
+  REAL sgn1 = 0;
+
+  for (i = 1; i < length; i++)
+  {
+    sgn1 = sgn(input[i]);
+    if (absdif(sgn0, sgn1) > 1)
+    {
+      if (firstCross < 0)
+      {
+        firstCross = i;
+        lastCross = firstCross;
+        iLeft = (i - 1) + (input[i - 1] / (REAL)(input[i - 1] - input[i]));
+      }
+      else
+      {
+        lastCross = i;
+      }
+      count++;
+    }
+    sgn0 = sgn1;
+  }
+
+
+  if ( lastCross - firstCross <= 0)
+  {
+    return 0;
+  }
+  else
+  {
+    iRight = (lastCross - 1) + (input[lastCross - 1] / (REAL)(input[lastCross - 1] - input[lastCross]));
+    return sampleRate * (count - 1) / ((REAL)2.0 * (iRight - iLeft));
+  }
+}
+/* considerar problema de señal digital */
 short zeroCrossingNum (short buffer[], int _size )
 {
   // create a variable to hold the zero crossing rate
@@ -381,13 +661,13 @@ short zeroCrossingNum (short buffer[], int _size )
   return zcr;
 }
 
-float zeroCrossingRate (short buffer[], int size)
+float zeroCrossingRate (short buffer[], int _size)
 {
   // create a variable to hold the zero crossing rate
   float zcr = 0;
 
   // for each audio sample, starting from the second one
-  for (int i = 1; i < size; i++)
+  for (int i = 1; i < _size; i++)
   {
     // initialise two booleans indicating whether or not
     // the current and previous sample are positive
@@ -403,7 +683,7 @@ float zeroCrossingRate (short buffer[], int size)
   }
 
   // return the zero crossing rate
-  return zcr / size;
+  return zcr / _size;
 }
 
 
@@ -419,15 +699,28 @@ void sort(short a[], int size) {
   }
 }
 
+void sort(float a[], int size) {
+  for (int i = 0; i < (size - 1); i++) {
+    for (int o = 0; o < (size - (i + 1)); o++) {
+      if (a[o] > a[o + 1]) {
+        float t = a[o];
+        a[o] = a[o + 1];
+        a[o + 1] = t;
+      }
+    }
+  }
+}
+
 float shortTofloat(short _value) {
   return ((float) _value / (float)(1 << 11) * (float)(2));
 }
 
-int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, short _ay, short _az, short _zc, short _iq) {
+int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
 
   WiFiClient client; // Use WiFiClient class to create TCP connections
   HTTPClient http;
   if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
+    digitalWrite(WifiPin, HIGH);
     http.begin("http://prosismic.zeke.cl/registrarEvento"); //HTTP
     // http.begin("http://jsonplaceholder.typicode.com/users"); //HTTP
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
@@ -441,10 +734,10 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     char line[160];
 
     //  snprintf(line, sizeof(line), "-F 'id=%d' -F 'tiempo=%lu' -F 'amax=%s'  -F 'tamax=%d' -F 'ax=%s' -F 'ay=%s' -F 'az=%s' -F 'zc=%s' -F 'iqr=%s' ", _id, now(), abuff, _tamax, xbuff, ybuff, zbuff, zcbuff, iqrbuff);
-    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq);
+    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav);
 
     int httpCode = http.POST(line);
-
+    digitalWrite(LED_BUILTIN, HIGH);
     Serial.print(line);
     String payload = http.getString();
     if (payload.equals("1"))
@@ -458,10 +751,10 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     return 0;
 
   } else {
+    digitalWrite(WifiPin, LOW);
     Serial.println("Error in WiFi connection");
     return 1;
   }
-
 }
 
 void digitalClockDisplay()
