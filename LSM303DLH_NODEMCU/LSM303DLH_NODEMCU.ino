@@ -26,7 +26,7 @@
 #define _SSID "zekefi-interno"  // network name
 #define _NETPASS "JtXDF5jK79es" // network password    
 
-#define REF_VAR false            // indicate if reference are variables or fixed values
+bool REF_VAR=false;            // indicate if reference are variables or fixed values
 
 int WifiPin = D7;     // wifi status LED
 int AccPin = D6;      // accelerometer data readings LED
@@ -95,7 +95,7 @@ float RSL;     //
 float IQR;    // Interquiarlie value
 short ZC;     // each axis media Zero crossing porcentaje entre 0-100
 short ZC_test;
-short CAV;    // Cumulative Acceleration vector value
+long CAV;    // Cumulative Acceleration vector value
 float RSLref;     //
 float IQRref;    // Interquiarlie value reference
 short ZCref;     // each axis Zero crossing sum reference
@@ -107,8 +107,8 @@ char ssid[] = _SSID;  //  your network SSID (name)
 char pass[] = _NETPASS;       // your network password
 
 /* NTP parameters and NTP Servers: */
-static const char ntpServerName[] = "us.pool.ntp.org";
-//static const char ntpServerName[] = "time.nist.gov";
+//static const char ntpServerName[] = "us.pool.ntp.org";
+static const char ntpServerName[] = "time.nist.gov";
 //static const char ntpServerName[] = "time-a.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
@@ -121,12 +121,12 @@ QuickStats stats; //initialize an instance of this class
 
 
 void setup()
-{ 
-  
+{
+
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(WifiPin,OUTPUT);
-  pinMode(AccPin,OUTPUT);
-  
+  pinMode(WifiPin, OUTPUT);
+  pinMode(AccPin, OUTPUT);
+
   Serial.begin(115200);
   // Wire.begin(int sda, int scl)
   Wire.begin(4, 5);       // join i2c bus (address optional for master)
@@ -141,9 +141,9 @@ void setup()
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    digitalWrite(WifiPin,LOW);
+    digitalWrite(WifiPin, LOW);
   }
-  digitalWrite(WifiPin,HIGH);
+  digitalWrite(WifiPin, HIGH);
   Serial.println("");
 
   Serial.print("IP number assigned by DHCP is ");
@@ -213,7 +213,7 @@ void loop()
 {
 
   if ((now()) != startSampling && sample == SAMPLES) {
-    digitalWrite(AccPin,LOW);
+    digitalWrite(AccPin, LOW);
     startSampling = now();
     eventStart = millis();
     // digitalClockDisplay();
@@ -257,16 +257,16 @@ void loop()
     digitalClockDisplay();
   }
 
-    if ((now() - wifiLap) == SECS_PER_MIN * TWC) {
+  if ((now() - wifiLap) == SECS_PER_MIN * TWC) {
     wifiLap = now();
-  /* wait until wifi is connected*/
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-    digitalWrite(WifiPin,LOW);
-  }
-  digitalWrite(WifiPin,HIGH);
-  Serial.println("");
+    /* wait until wifi is connected*/
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+      digitalWrite(WifiPin, LOW);
+    }
+    digitalWrite(WifiPin, HIGH);
+    Serial.println("");
   }
 
 
@@ -279,7 +279,7 @@ void loop()
   /* read values at sampling rate */
   if (millis() - tiempo >= INTERVALO) {
     tiempo = millis();
-    digitalWrite(AccPin,HIGH);
+    digitalWrite(AccPin, HIGH);
     /*
         compass.read();
 
@@ -331,7 +331,7 @@ void loop()
       acc_zMax = acc_zabs;
     }
 
-    //  print_acc_values();
+      print_acc_values();
 
     old_x = acc_x[sample];
     old_y = acc_y[sample];
@@ -340,7 +340,7 @@ void loop()
 
     /* Parameter cals */
 
-    float CAVshort = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, 25)*1000; // Mag(acc) short term media
+    float CAVshort = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, 25) * 1000; // Mag(acc) short term media
     CAV = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, SAMPLES) * 1000; // Mag(acc)  long term media
     RSL = (CAVshort) / (CAV) * 100; // con
     stats.bubbleSort(AccNetnow, SAMPLES);
@@ -374,13 +374,18 @@ void loop()
     //  print_results();
 
     digitalWrite(LED_BUILTIN, LOW);
-//    if ((now() - sendTime >= TASD) && (IQR > IQRref && ZC > ZCref && CAV > CAVref  && RSLref)) {
-      if ((now() - sendTime >= TASD) && (IQR > IQRref || ZC > ZCref || CAV > CAVref || RSL <= RSLref || ACNmax >= ACNref)) {
-        digitalClockDisplay();
+    //    if ((now() - sendTime >= TASD) && (IQR > IQRref && ZC > ZCref && CAV > CAVref  && RSLref)) {
+
+  }
+
+  if (now() - sendTime >= TASD) {
+    if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+      digitalClockDisplay();
       sendTime = now();
       sendPost(ID, now(), ACNmax, mag_t, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
     }
   }
+
 }
 
 void DRAcc_ISR () {
@@ -468,12 +473,12 @@ void calc_ref() {
     ACNref = (ACNmax - ACNmin) * Factor_ACN;
     ZCref = ZCmax - ZCmin * Factor_ACN;
     RSLref = (RSLref - RSLref) * Factor_RSL;
-  } else{
+  } else {
     ACNref = (ACNmax - ACNmin) * Factor_ACN;
     IQRref = 5000;
-  CAVref = 10000;
-  RSLref = 145;
-  ZCref = 30;
+    CAVref = 10000;
+    RSLref = 145;
+    ZCref = ZCmax - ZCmin * Factor_ACN;;
   }
 }
 void print_ref_raw() {
@@ -505,7 +510,7 @@ void print_ref() {
   Serial.print("\t");
   Serial.print("RSLref ");
   Serial.print("\t");
-  Serial.println(ACNref);
+  Serial.println(RSLref);
 
 
 }
@@ -732,7 +737,7 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
   WiFiClient client; // Use WiFiClient class to create TCP connections
   HTTPClient http;
   if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
-    digitalWrite(WifiPin,HIGH);
+    digitalWrite(WifiPin, HIGH);
     http.begin("http://prosismic.zeke.cl/registrarEvento"); //HTTP
     // http.begin("http://jsonplaceholder.typicode.com/users"); //HTTP
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
@@ -763,7 +768,7 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     return 0;
 
   } else {
-    digitalWrite(WifiPin,LOW);
+    digitalWrite(WifiPin, LOW);
     Serial.println("Error in WiFi connection");
     return 1;
   }
