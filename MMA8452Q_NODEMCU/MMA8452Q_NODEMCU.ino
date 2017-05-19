@@ -24,7 +24,7 @@
 #define StartWindow 20
 #define _SSID "zekefi-interno"   // network name
 #define _NETPASS "JtXDF5jK79es"  // network password    
-#define REF_VAR false            // indicate if reference are variables or fixed values
+bool REF_VAR = false;          // indicate if reference are variables or fixed values
 
 
 int WifiPin = D7;     // wifi status LED
@@ -91,7 +91,7 @@ float RSL;     //
 float IQR;    // Interquiarlie value
 short ZC;     // each axis media Zero crossing porcentaje entre 0-100
 short ZC_test;
-short CAV;    // Cumulative Acceleration vector value
+long CAV;    // Cumulative Acceleration vector value
 float RSLref;     //
 float IQRref;    // Interquiarlie value reference
 short ZCref;     // each axis Zero crossing sum reference
@@ -104,8 +104,8 @@ char ssid[] = _SSID;  //  your network SSID (name)
 char pass[] = _NETPASS;       // your network password
 
 /* NTP parameters and NTP Servers: */
-static const char ntpServerName[] = "us.pool.ntp.org";
-//static const char ntpServerName[] = "time.nist.gov";
+//static const char ntpServerName[] = "us.pool.ntp.org";
+static const char ntpServerName[] = "time.nist.gov";
 //static const char ntpServerName[] = "time-a.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
@@ -186,19 +186,20 @@ void setup()
   ZCmax = 0;
   ZCmin = 0;
 
-  offset_x = 0;
-  offset_y = 0;
-  offset_z = 0;
+
+    filterOneHighpassX.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a o:qne pole (RC) highpass filter
+    filterOneHighpassY.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
+    filterOneHighpassZ.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
+    offset_x = 0;
+    offset_y = 0;
+    offset_z = 0;
+
   sample = 0;
 
   parameterLap = now();
   startTime = now();
   sendTime = now();
   wifiLap = now();
-
-  filterOneHighpassX.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a o:qne pole (RC) highpass filter
-  filterOneHighpassY.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
-  filterOneHighpassZ.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
 
 }
 
@@ -211,6 +212,9 @@ void loop()
     digitalWrite(AccPin, LOW);
     startSampling = now();
     eventStart = millis();
+
+    print_ref();
+    print_parameter();
     /* All over again */
     sample = 0;
     IQRmax = 0.0;
@@ -279,10 +283,11 @@ void loop()
       acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
       acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
     */
+    /*
     acc_x[sample] = 0.5 * (filterOneHighpassX.output() - offset_x) + 0.5 * old_x;
     acc_y[sample] = 0.5 * (filterOneHighpassY.output() - offset_y) + 0.5 * old_y;
     acc_z[sample] = 0.5 * (filterOneHighpassZ.output() - offset_z) + 0.5 * old_z;
-
+*/
     AccNetnow[sample] = sqrt(acc_x[sample] * acc_x[sample] + acc_y[sample] * acc_y[sample] + acc_z[sample] * acc_z[sample]);
 
     if ( sample == 0) {
@@ -328,12 +333,12 @@ void loop()
     /* Parameter cals */
 
     float CAVshort = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, 25) * 1000; // Mag(acc) short term media
-    CAV = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, SAMPLES); // Mag(acc)  long term media
-    RSL = (CAVshort / 25) / (CAV / SAMPLES); //
+    CAV = cummulativeMeasureAmplitud(AccNetnow, SAMPLES, SAMPLES) * 1000; // Mag(acc)  long term media
+    RSL = (CAVshort) / (CAV ) * 100; //
     stats.bubbleSort(AccNetnow, SAMPLES);
     float Q1 = AccNetnow[SAMPLES / 4 - 1];
     float Q3 = AccNetnow[SAMPLES * 3 / 4 - 1];
-    IQR = Q3 - Q1;   // IQR
+    IQR = (Q3 - Q1) * 1000; // IQR
     ZC = int((zeroCrossingRate(acc_x, SAMPLES) + zeroCrossingRate(acc_y, SAMPLES) + zeroCrossingRate(acc_z, SAMPLES)) * 100 / 3);
 
     if (IQR > IQRmax) {
@@ -362,7 +367,9 @@ void loop()
 
     digitalWrite(LED_BUILTIN, LOW);
     //    if ((now() - sendTime >= TASD) && (IQR > IQRref && ZC > ZCref && CAV > CAVref  && RSLref)) {
-    if ((now() - sendTime >= TASD) && (IQR > IQRref || ZC > ZCref || CAV > CAVref || RSL <= RSLref || ACNmax >= ACNref)) {
+  }
+  if (now() - sendTime >= TASD) {
+    if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
       digitalClockDisplay();
       sendTime = now();
       sendPost(ID, now(), ACNmax, mag_t, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
@@ -451,18 +458,18 @@ void restore_parameters() {
 }
 
 void calc_ref() {
-  if ( REF_VAR == true) {
+  if (REF_VAR) {
     IQRref = (IQRmax - IQRmin) * Factor_IQR;
     CAVref = (CAVmax - CAVmin) * Factor_CAV;
     ACNref = (ACNmax - ACNmin) * Factor_ACN;
     ZCref = ZCmax - ZCmin * Factor_ACN;
-    RSLref = (RSLref - RSLref) * Factor_RSL;
+    RSLref = 145;
   } else {
     ACNref = (ACNmax - ACNmin) * Factor_ACN;
     IQRref = 5000;
     CAVref = 10000;
     RSLref = 145;
-    ZCref = 30;
+    ZCref = ZCref = ZCmax - ZCmin * Factor_ACN;;
   }
 }
 void print_ref_raw() {
@@ -494,7 +501,7 @@ void print_ref() {
   Serial.print("\t");
   Serial.print("RSLref ");
   Serial.print("\t");
-  Serial.println(ACNref);
+  Serial.println(RSLref);
 
 
 }
