@@ -6,6 +6,7 @@
 #include <SparkFun_MMA8452Q.h> // Includes the SFE_MMA8452Q library
 #include <ESP8266HTTPClient.h>
 #include "QuickStats.h"
+#include <ArduinoJson.h>
 
 
 #define SAMPLES 200              // samples number
@@ -24,7 +25,8 @@
 #define StartWindow 20
 #define _SSID "zekefi-interno"   // network name
 #define _NETPASS "JtXDF5jK79es"  // network password    
-bool REF_VAR = false;          // indicate if reference are variables or fixed values
+#define OFFSET true              // set median dc offset remove
+#define REF_VAR  false          // indicate if reference are variables or fixed values
 
 
 int WifiPin = D7;     // wifi status LED
@@ -112,9 +114,14 @@ static const char ntpServerName[] = "time.nist.gov";
 const int timeZone = -3;
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
-QuickStats stats; //initialize an instance of this class
+QuickStats stats;               //initialize an instance of this class
 
-
+/* geolocation variables */
+const char* host = "freegeoip.net";        // host where the ip is get it
+char latitude[32];                         // latitude value from host
+char longitude[32];                        // longitude value from host
+const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
+const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
 
 void setup()
 {
@@ -146,7 +153,7 @@ void setup()
   Serial.println(WiFi.localIP());
   Serial.println("Starting UDP");
 
-  /* NTP time config*/
+  /* NTP time config */
   Udp.begin(localPort);
   Serial.print("Local port: ");
   Serial.println(Udp.localPort());
@@ -155,6 +162,9 @@ void setup()
   setSyncInterval(300);
   Serial.print("Current time: ");
   digitalClockDisplay();
+  
+  /* geolocation config */
+  getGeo();
 
   /* acclereometer setup , see library for details */
   while (!accel.setup()) {
@@ -173,9 +183,9 @@ void setup()
     acc_z[k] = 0;
   }
   RSLref = 0;
-  IQRref = 100.00;    // Interquiarlie value reference
-  ZCref = 100;     // each axis Zero crossing sum reference
-  CAVref = 200;    // Cumulative Acceleration vector reference
+  IQRref = 100.00;    
+  ZCref = 100;    
+  CAVref = 200;    
   ACNref = 100;
   IQRmax = 0.0;
   IQRmin = 0.0;
@@ -186,6 +196,10 @@ void setup()
   ZCmax = 0;
   ZCmin = 0;
 
+  if (OFFSET) {
+    offset(SAMPLES);
+  }
+  else {
 
     filterOneHighpassX.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a o:qne pole (RC) highpass filter
     filterOneHighpassY.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
@@ -193,7 +207,7 @@ void setup()
     offset_x = 0;
     offset_y = 0;
     offset_z = 0;
-
+  }
   sample = 0;
 
   parameterLap = now();
@@ -207,14 +221,13 @@ void setup()
 void loop()
 {
 
-  //update the display only if time has changed
   if ((now()) != startSampling && sample == SAMPLES) {
     digitalWrite(AccPin, LOW);
     startSampling = now();
     eventStart = millis();
-
     print_ref();
     print_parameter();
+    
     /* All over again */
     sample = 0;
     IQRmax = 0.0;
@@ -245,10 +258,10 @@ void loop()
   }
 
 
-  /* parameter calcs every TRNM minutes */
-
+  /* parameter calcs every TRNM minutes and restore offset values */
   if ((now() - parameterLap) == SECS_PER_MIN * TRNM) {
     parameterLap = now();
+    offset(SAMPLES);
     calc_ref();
     print_ref();
     digitalClockDisplay();
@@ -268,33 +281,33 @@ void loop()
 
   accel.readRaw();
 
-  filterOneHighpassX.input(accel.x);
-  filterOneHighpassY.input(accel.y);
-  filterOneHighpassZ.input(accel.z);
-
+  if (!OFFSET) {
+    filterOneHighpassX.input(accel.x);
+    filterOneHighpassY.input(accel.y);
+    filterOneHighpassZ.input(accel.z);
+  }
   /* read values at sampling rate */
   if (millis() - tiempo >= INTERVALO) {
     tiempo = millis();
     digitalWrite(AccPin, HIGH);
-    /*
-      accel.readRaw();
 
+    if (OFFSET) {
       acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
       acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
       acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
-    */
-    /*
-    acc_x[sample] = 0.5 * (filterOneHighpassX.output() - offset_x) + 0.5 * old_x;
-    acc_y[sample] = 0.5 * (filterOneHighpassY.output() - offset_y) + 0.5 * old_y;
-    acc_z[sample] = 0.5 * (filterOneHighpassZ.output() - offset_z) + 0.5 * old_z;
-*/
+    }
+    else {
+      acc_x[sample] = 0.5 * (filterOneHighpassX.output()) + 0.5 * old_x;
+      acc_y[sample] = 0.5 * (filterOneHighpassY.output()) + 0.5 * old_y;
+      acc_z[sample] = 0.5 * (filterOneHighpassZ.output()) + 0.5 * old_z;
+    }
     AccNetnow[sample] = sqrt(acc_x[sample] * acc_x[sample] + acc_y[sample] * acc_y[sample] + acc_z[sample] * acc_z[sample]);
 
     if ( sample == 0) {
       acc_xMax = abs(acc_x[sample]);
       acc_yMax = abs(acc_y[sample]);
       acc_zMax = abs(acc_z[sample]);
-      AccNetnowMax = AccNetnow[sample];
+      ACNmax = AccNetnow[sample];
 
     }
     short acc_xabs = abs(acc_x[sample]);
@@ -722,6 +735,95 @@ float shortTofloat(short _value) {
   return ((float) _value / (float)(1 << 11) * (float)(2));
 }
 
+void getGeo() {
+
+  Serial.print("connecting to ");
+  Serial.println(host);
+
+  // Use WiFiClient class to create TCP connections
+  WiFiClient client;
+  const int httpPort = 80;
+
+  if (!client.connect(host, httpPort)) {
+    Serial.println("connection failed");
+    return;
+  }
+
+  // We now create a URI for the request
+  String url = "/json/";
+  // url += streamId;
+  //  url += "?private_key=";
+  //  url += privateKey;
+  //  url += "&value=";
+  //  url += value;
+
+  Serial.print("Requesting URL: ");
+  Serial.println(url);
+  Serial.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "Connection: close\r\n\r\n");
+
+  // This will send the request to the server
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "Connection: close\r\n\r\n");
+  unsigned long timeout = millis();
+
+  while (client.available() == 0) {
+    if (millis() - timeout > 5000) {
+      Serial.println(">>> Client Timeout !");
+      client.stop();
+      return;
+    }
+  }
+
+  // Skip HTTP headers so that we are at the beginning of the response's body
+  // HTTP headers end with an empty line
+  char endOfHeaders[] = "\r\n\r\n";
+
+  client.setTimeout(HTTP_TIMEOUT);
+  bool ok = client.find(endOfHeaders);
+
+  if (!ok) {
+    Serial.println("No response or invalid response!");
+  }
+
+  // Compute optimal size of the JSON buffer according to what we need to parse.
+  // This is only required if you use StaticJsonBuffer.
+  const size_t BUFFER_SIZE =
+    JSON_OBJECT_SIZE(8)    // the root object has 8 elements
+    + JSON_OBJECT_SIZE(5)  // the "address" object has 5 elements
+    + JSON_OBJECT_SIZE(2)  // the "geo" object has 2 elements
+    + JSON_OBJECT_SIZE(3)  // the "company" object has 3 elements
+    + MAX_CONTENT_SIZE;    // additional space for strings
+
+  // Allocate a temporary memory pool
+  DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
+
+  JsonObject& root = jsonBuffer.parseObject(client);
+
+  if (!root.success()) {
+    Serial.println("JSON parsing failed!");
+    return;
+  }
+
+  // Here were copy the strings we're interested in
+  strcpy(latitude, root["latitude"]);
+  strcpy(longitude, root["longitude"]);
+  // It's not mandatory to make a copy, you could just use the pointers
+  // Since, they are pointing inside the "content" buffer, so you need to make
+  // sure it's still in memory when you read the string
+
+  Serial.print("Longitude = ");
+  Serial.println(longitude);
+  Serial.print("Latitude = ");
+  Serial.println(latitude);
+
+  Serial.println("Disconnect");
+  client.stop();
+}
+
+
 int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
 
   WiFiClient client; // Use WiFiClient class to create TCP connections
@@ -741,7 +843,7 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     char line[160];
 
     //  snprintf(line, sizeof(line), "-F 'id=%d' -F 'tiempo=%lu' -F 'amax=%s'  -F 'tamax=%d' -F 'ax=%s' -F 'ay=%s' -F 'az=%s' -F 'zc=%s' -F 'iqr=%s' ", _id, now(), abuff, _tamax, xbuff, ybuff, zbuff, zcbuff, iqrbuff);
-    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav);
+    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav,longitude,latitude);
 
     int httpCode = http.POST(line);
     digitalWrite(LED_BUILTIN, HIGH);
@@ -787,6 +889,8 @@ void printDigits(int digits)
     Serial.print('0');
   Serial.print(digits);
 }
+
+
 
 
 

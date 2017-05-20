@@ -6,11 +6,11 @@
 #include <Filters.h>
 #include <ESP8266HTTPClient.h>
 #include "QuickStats.h"
-
+#include <ArduinoJson.h>
 
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
-#define ID  2                 // device number identification
+#define ID  3                 // device number identification
 #define TRNM 10UL             // Parameter in between windwos time in min
 #define TRST 20                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
@@ -22,11 +22,12 @@
 #define Factor_ZC   0.25      // Zero Crossing rate reference factor
 #define Factor_RSL  7
 #define StartWindow 20
-
+#define OFFSET true              // set median dc offset remove
+#define REF_VAR false            // indicate if reference are variables or fixed values
 #define _SSID "zekefi-interno"  // network name
 #define _NETPASS "JtXDF5jK79es" // network password    
 
-#define REF_VAR false            // indicate if reference are variables or fixed values
+
 
 int WifiPin = D7;     // wifi status LED
 int AccPin = D6;      // accelerometer data readings LED
@@ -114,11 +115,16 @@ static const char ntpServerName[] = "time.nist.gov";
 //static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
 const int timeZone = -3;
-
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
+QuickStats stats;               //initialize an instance of this class
 
-QuickStats stats; //initialize an instance of this class
+/* geolocation variables */
+const char* host = "freegeoip.net";        // host where the ip is get it
+char latitude[32];                         // latitude value from host
+char longitude[32];                        // longitude value from host
+const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
+const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
 
 
 void setup()
@@ -161,14 +167,17 @@ void setup()
   Serial.print("Current time: ");
   digitalClockDisplay();
 
+  /* geolocation config */
+  getGeo();
+
   /* acclereometer setup , see library for details */
   while (!accelerometer.begin()) {
     Serial.println("Could not find a valid ADXL345 sensor, check wiring!");
     delay(5000);
   }
-    accelerometer.useInterrupt(ADXL345_INT1);
-    accelerometer.setRange(ADXL345_RANGE_2G);
-    accelerometer.setDataRate(ADXL345_DATARATE_200HZ);
+  accelerometer.useInterrupt(ADXL345_INT1);
+  accelerometer.setRange(ADXL345_RANGE_2G);
+  accelerometer.setDataRate(ADXL345_DATARATE_200HZ);
   Serial.print("ADXL345 setup complete !");
 
   //  pinMode(DRINTPin, INPUT_PULLUP);
@@ -195,9 +204,19 @@ void setup()
   ZCmax = 0;
   ZCmin = 0;
 
-  offset_x = 0;
-  offset_y = 0;
-  offset_z = 0;
+  if (OFFSET) {
+    offset(SAMPLES);
+  }
+  else {
+
+    filterOneHighpassX.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a o:qne pole (RC) highpass filter
+    filterOneHighpassY.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
+    filterOneHighpassZ.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
+    offset_x = 0;
+    offset_y = 0;
+    offset_z = 0;
+  }
+
   sample = 0;
 
   parameterLap = now();
@@ -219,7 +238,6 @@ void loop()
     digitalWrite(AccPin, LOW);
     startSampling = now();
     eventStart = millis();
-    // digitalClockDisplay();
     print_ref();
     print_parameter();
 
@@ -251,10 +269,10 @@ void loop()
     digitalClockDisplay();
   }
 
-  /* parameter calcs every TRNM minutes */
-
+  /* parameter calcs every TRNM minutes and restore offset values */
   if ((now() - parameterLap) == SECS_PER_MIN * TRNM) {
     parameterLap = now();
+    offset(SAMPLES);
     calc_ref();
     print_ref();
     digitalClockDisplay();
@@ -275,31 +293,29 @@ void loop()
 
   sca = accelerometer.readmg();
 
-  filterOneHighpassX.input(sca.XAxis);
-  filterOneHighpassY.input(sca.YAxis);
-  filterOneHighpassZ.input(sca.ZAxis);
+  if (!OFFSET) {
+    filterOneHighpassX.input(sca.XAxis);
+    filterOneHighpassY.input(sca.YAxis);
+    filterOneHighpassZ.input(sca.ZAxis);
+  }
 
   /* read values at sampling rate */
   if (millis() - tiempo >= INTERVALO) {
     tiempo = millis();
     digitalWrite(AccPin, HIGH);
-    /*
-        compass.read();
 
-        filterOneHighpassX.input(compass.a.x / 16);
-        filterOneHighpassY.input(compass.a.y / 16);
-        filterOneHighpassZ.input(compass.a.z / 16);
-    */
-    /*
-      acc_x[sample] = 0.5 * (compass.a.x - offset_x) + 0.5 * old_x;
-      acc_y[sample] = 0.5 * (compass.a.y - offset_y) + 0.5 * old_y;
-      acc_z[sample] = 0.5 * (compass.a.z - offset_z) + 0.5 * old_z;
-    */
 
-    acc_x[sample] = 0.5 * (filterOneHighpassX.output() - offset_x) + 0.5 * old_x;
-    acc_y[sample] = 0.5 * (filterOneHighpassY.output() - offset_y) + 0.5 * old_y;
-    acc_z[sample] = 0.5 * (filterOneHighpassZ.output() - offset_z) + 0.5 * old_z;
 
+
+    if (OFFSET) {
+      acc_x[sample] = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
+      acc_y[sample] = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
+      acc_z[sample] = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
+    } else {
+      acc_x[sample] = 0.5 * (filterOneHighpassX.output() - offset_x) + 0.5 * old_x;
+      acc_y[sample] = 0.5 * (filterOneHighpassY.output() - offset_y) + 0.5 * old_y;
+      acc_z[sample] = 0.5 * (filterOneHighpassZ.output() - offset_z) + 0.5 * old_z;
+    }
     /* aceleracion neta (guardar decimales ) */
     AccNetnow[sample] = sqrt(acc_x[sample] * acc_x[sample] + acc_y[sample] * acc_y[sample] + acc_z[sample] * acc_z[sample]);
 
@@ -334,7 +350,7 @@ void loop()
       acc_zMax = acc_zabs;
     }
 
-      print_acc_values();
+    print_acc_values();
 
     old_x = acc_x[sample];
     old_y = acc_y[sample];
@@ -351,7 +367,6 @@ void loop()
     float Q3 = AccNetnow[SAMPLES / 4 * 3 - 1];
     IQR = (Q3 - Q1) * 1000; // IQR
     ZC = int((zeroCrossingRate(acc_x, SAMPLES) + zeroCrossingRate(acc_y, SAMPLES) + zeroCrossingRate(acc_z, SAMPLES)) * 100 / 3);
-    // ZC_test  = int( zeroCross(acc_x, SAMPLES, FrecRPS) *+ zeroCross(acc_y, SAMPLES, FrecRPS) + zeroCross(acc_z, SAMPLES, FrecRPS) *100 /3 );
 
     if (IQR > IQRmax) {
       IQRmax = IQR;
@@ -542,8 +557,8 @@ void offset(int samples) {
 
   while (j < samples) {
     if (millis() - tiempo >= INTERVALO) {
-      
-    sca = accelerometer.readmg();
+
+      sca = accelerometer.readmg();
       offset_x += sca.XAxis;
       offset_y += sca.YAxis;
       offset_z += sca.ZAxis;
@@ -733,6 +748,94 @@ float shortTofloat(short _value) {
   return ((float) _value / (float)(1 << 11) * (float)(2));
 }
 
+void getGeo() {
+
+  Serial.print("connecting to ");
+  Serial.println(host);
+
+  // Use WiFiClient class to create TCP connections
+  WiFiClient client;
+  const int httpPort = 80;
+
+  if (!client.connect(host, httpPort)) {
+    Serial.println("connection failed");
+    return;
+  }
+
+  // We now create a URI for the request
+  String url = "/json/";
+  // url += streamId;
+  //  url += "?private_key=";
+  //  url += privateKey;
+  //  url += "&value=";
+  //  url += value;
+
+  Serial.print("Requesting URL: ");
+  Serial.println(url);
+  Serial.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "Connection: close\r\n\r\n");
+
+  // This will send the request to the server
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "Connection: close\r\n\r\n");
+  unsigned long timeout = millis();
+
+  while (client.available() == 0) {
+    if (millis() - timeout > 5000) {
+      Serial.println(">>> Client Timeout !");
+      client.stop();
+      return;
+    }
+  }
+
+  // Skip HTTP headers so that we are at the beginning of the response's body
+  // HTTP headers end with an empty line
+  char endOfHeaders[] = "\r\n\r\n";
+
+  client.setTimeout(HTTP_TIMEOUT);
+  bool ok = client.find(endOfHeaders);
+
+  if (!ok) {
+    Serial.println("No response or invalid response!");
+  }
+
+  // Compute optimal size of the JSON buffer according to what we need to parse.
+  // This is only required if you use StaticJsonBuffer.
+  const size_t BUFFER_SIZE =
+    JSON_OBJECT_SIZE(8)    // the root object has 8 elements
+    + JSON_OBJECT_SIZE(5)  // the "address" object has 5 elements
+    + JSON_OBJECT_SIZE(2)  // the "geo" object has 2 elements
+    + JSON_OBJECT_SIZE(3)  // the "company" object has 3 elements
+    + MAX_CONTENT_SIZE;    // additional space for strings
+
+  // Allocate a temporary memory pool
+  DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
+
+  JsonObject& root = jsonBuffer.parseObject(client);
+
+  if (!root.success()) {
+    Serial.println("JSON parsing failed!");
+    return;
+  }
+
+  // Here were copy the strings we're interested in
+  strcpy(latitude, root["latitude"]);
+  strcpy(longitude, root["longitude"]);
+  // It's not mandatory to make a copy, you could just use the pointers
+  // Since, they are pointing inside the "content" buffer, so you need to make
+  // sure it's still in memory when you read the string
+
+  Serial.print("Longitude = ");
+  Serial.println(longitude);
+  Serial.print("Latitude = ");
+  Serial.println(latitude);
+
+  Serial.println("Disconnect");
+  client.stop();
+}
+
 int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
 
   WiFiClient client; // Use WiFiClient class to create TCP connections
@@ -752,7 +855,7 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     char line[160];
 
     //  snprintf(line, sizeof(line), "-F 'id=%d' -F 'tiempo=%lu' -F 'amax=%s'  -F 'tamax=%d' -F 'ax=%s' -F 'ay=%s' -F 'az=%s' -F 'zc=%s' -F 'iqr=%s' ", _id, now(), abuff, _tamax, xbuff, ybuff, zbuff, zcbuff, iqrbuff);
-    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav);
+    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav,latitude,longitude);
 
     int httpCode = http.POST(line);
     digitalWrite(LED_BUILTIN, HIGH);
