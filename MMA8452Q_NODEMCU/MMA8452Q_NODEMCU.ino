@@ -22,8 +22,10 @@
 #define Factor_ZC   0.25         // Zero Crossing rate reference factor
 #define Factor_RSL  7            // Mr. P reference factor
 #define StartWindow 20
-#define _SSID "zekefi-interno"   // network name
-#define _NETPASS "JtXDF5jK79es"  // network password    
+//#define _SSID "zekefi-interno"   // network name
+//#define _NETPASS "JtXDF5jK79es"  // network password    
+#define _SSID "Familia"   // network name
+#define _NETPASS "1234familia" // network password
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR  false          // indicate if reference are variables or fixed values
 
@@ -46,11 +48,15 @@ unsigned int INTERVALO = (1000 / FrecRPS); // ms
 time_t tiempo;        // ?
 time_t startSampling; // when a new simpling windwow start
 time_t eventStart;    // when a calculation windwos start
-time_t windowStart;   // ?
+time_t prevtime;      // time for check every one second
 time_t startTime;     // time after setup() if finished
 time_t parameterLap;  // time between reference recalculation
 time_t sendTime;      // when an event start
 time_t wifiLap;       // counter time for wifi check
+time_t ntpmicro;      // ntp microseconds
+time_t deltasampling;  // time of 1 sampling
+time_t eventAccion;   // time after event is on
+time_t amaxm;         // millsecond of the max acceleration
 
 /* accelerometer parameters and variables  */
 int sample;   // accerelometer sample index
@@ -117,7 +123,7 @@ void setup()
 
   Serial.begin(500000);
   // Wire.begin(int sda, int scl)
-  Wire.begin(4, 5);       // join i2c bus (address optional for master)
+//  Wire.begin(4, 5);       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
   Serial.println("Prosismic");
@@ -202,7 +208,6 @@ void setup()
   startSampling = millis();
   wifiLap = now();
   digitalWrite(AccPin, LOW);
-  Serial.print("BLABLABLA");
 }
 
 void loop()
@@ -216,15 +221,15 @@ void loop()
   }
   /* read values at sampling rate */
   if (millis() - tiempo >= INTERVALO) {
-
     if (sample == SAMPLES) {
-      Serial.print(millis() - startSampling);
+   /*   Serial.print(millis() - startSampling);
       Serial.print(" ");
       digitalClockDisplay();
       Serial.println();     
       startSampling = millis();
+      */
       /* All over again */
-      sample = 0;
+     /*
       IQRmax = 0.0;
       IQRmin = 0.0;
       CAVmax = 0;
@@ -233,9 +238,12 @@ void loop()
       ACNmin = 0;
       ZCmax = 0;
       ZCmin = 0;
+     
+      */
+      sample = 0;
+
       digitalWrite(LED_BUILTIN, LOW);
     }
-
     tiempo = millis();
     if (OFFSET) {
       acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
@@ -258,15 +266,26 @@ void loop()
     old_y = acc_y[sample];
     old_z = acc_z[sample];
     /* Sampling end */
-    print_all();
+    printmsecs();
+    Serial.println("   ");
+    print_acc_values_raw();
+    Serial.println();
     sample++;
+    deltasampling=millis()-eventStart;
+    eventStart= millis();
     digitalWrite(LED_BUILTIN, LOW);
+  }
+
+    if (timeStatus() != timeNotSet) {
+    if (now() != prevtime) { //update the display only if time has changed
+      prevtime = now();
+      ntpmicro = millis();
+    }
   }
   /* Sesim event detect and check every 1 TASD secs after first detection*/
   if (millis() - sendTime >= TASD) {
     if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
       digitalWrite(LED_BUILTIN, HIGH);
-      digitalClockDisplay();
       sendTime = millis();
       sendPost(ID, now(), ACNmax/100, mag_t, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
     }
@@ -275,7 +294,6 @@ void loop()
   if ((now() - startTime) == TRST) {
     calc_ref();
     print_ref();
-    digitalClockDisplay();
     digitalWrite(AccPin, HIGH);
   }
   /* parameter calcs every TRNM minutes and restore offset values */
@@ -283,7 +301,6 @@ void loop()
     parameterLap = now();
     calc_ref();
     print_ref();
-    digitalClockDisplay();
   }
   /* check WIFI status every TWC minutes */
   if ((now() - wifiLap) == SECS_PER_MIN * TWC) {
@@ -315,6 +332,7 @@ void MaxMinAcc() {
   if (AccNetnow[sample]  > ACNmax) {
     ACNmax = AccNetnow[sample];
     mag_t = sample;
+    amaxm = (millis()-ntpmicro)%1000;
   }
   if (AccNetnow[sample] <= ACNmin) {
     ACNmin = AccNetnow[sample];
@@ -609,15 +627,15 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     http.begin("http://prosismic.zeke.cl/registrarEvento"); //HTTP
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
-    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav, longitude, latitude);
-    int httpCode = http.POST(line);
+    snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo,(millis()-ntpmicro)%1000, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav, latitude, longitude);
+   int httpCode = http.POST(line);
     Serial.print(line);
     String payload = http.getString();
     http.end();
     Serial.print("   httpCode  ");
     Serial.print(httpCode);   //Print HTTP return code
-    Serial.print("   payload  ");
-    Serial.println(payload);    //Print request response payload
+//    Serial.print("   payload  ");
+//    Serial.println(payload);    //Print request response payload
     return 0;
   } else {
     digitalWrite(WifiPin, LOW);
@@ -625,13 +643,22 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     return 1;
   }
 }
-void print_all(){
-   //   print_acc_values();
-   //   Serial.print("\t");
-      print_parameter();
-      Serial.print("\t");
-      print_ref();
-      Serial.println();
+void printmsecs(){
+  time_t _time = millis()-ntpmicro;
+  Serial.print(now());
+  Serial.print(".");
+  Serial.print(_time%1000);
+  
+}
+void print_all() {
+  printmsecs();
+  Serial.print("\t");
+  print_acc_values();
+  Serial.print("\t");
+  print_parameter();
+  Serial.print("\t");
+  print_ref();
+  Serial.println();
 }
 void print_parameter() {
   Serial.print("IQR");

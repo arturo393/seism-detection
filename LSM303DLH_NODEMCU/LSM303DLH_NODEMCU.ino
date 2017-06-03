@@ -12,7 +12,7 @@
 #define N_WIN 2               // Windwos 
 #define ID 4                  // device number identification
 #define TRNM 86400UL             // Parameter in between windwos time in min
-#define TRST 10000UL                // Start parameter windwos in secs
+#define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
 #define TASD 1000               // time after send data in msecs
 #define TWC 1                 // time Wifi check
@@ -44,16 +44,19 @@ unsigned int INTERVALO = (1000 / FrecRPS); // s
 
 /* time variables */
 time_t tiempo;        // ?
-time_t startSampling; // when a new simpling windwow start
-time_t eventStart;    // when a calculation windwos start
-time_t windowStart;   // ?
-time_t startTime;     // time after setup() if finished
+time_t prevtime;      // time for check every one second
 time_t parameterLap;  // time between reference recalculation
 time_t sendTime;      // when an event start
 time_t wifiLap;       // counter time for wifi check
+time_t ntpmicro;      // ntp microseconds
+time_t eventAccion;   // time after event is on
+time_t amaxm;         // millsecond of the max acceleration
+time_t startTime;
 
 /* accelerometer parameters and variables  */
+bool DATASEND;             // enable/disable send event to server
 int sample;                // sample index
+int prevsample;
 LSM303 compass;                     // acelerometer objet
 long offset_x, offset_y, offset_z; // offset data for normalization
 short old_x, old_y, old_z;         // old acceleration data for normalization
@@ -70,24 +73,27 @@ short mag_t;              // sample number of aceleration magnitude
 short x_t;                // sample number of aceleration x-axis
 short y_t;                // sample number of aceleration y-axis
 short z_t;                // sample number of aceleration z-axis
-float IQRmax;  // maximun value Interquiarlie
-float IQRmin;  // minimun value Interquiarlie
+short IQRmax;  // maximun value Interquiarlie
+short IQRmin;  // minimun value Interquiarlie
 short CAVmax;  // maximun value Cumulative aceleration vector
 short CAVmin;  // minimun value Cumulative aceleration vector
-float ACNmax;  // maximun value ?
-float ACNmin;  // minimun value ?
+short ACNmax;  // maximun value ?
+short ACNmin;  // minimun value ?
 short ZCmax;   // maximun value Zero crossing
 short ZCmin;   // minimun value Zero crossing
-float RSL;     //
-float IQR;    // Interquiarlie value
+short RSL;     //
+short IQR;    // Interquiarlie value
 short ZC;     // each axis media Zero crossing porcentaje entre 0-100
-short ZC_test;
 long CAV;    // Cumulative Acceleration vector value
-float RSLref;     //
-float IQRref;    // Interquiarlie value reference
+short RSL_prev;     //
+short IQR_prev;    // Interquiarlie value
+short ZC_prev;     // each axis media Zero crossing porcentaje entre 0-100
+long CAV_prev;    // Cumulative Acceleration vector value
+short RSLref;     //
+short IQRref;    // Interquiarlie value reference
 short ZCref;     // each axis Zero crossing sum reference
 long CAVref;    // Cumulative Acceleration vector reference
-float ACNref;    // Cumulative Acceleration vector reference
+short ACNref;    // Cumulative Acceleration vector reference
 
 /* AP settings */
 char ssid[] = _SSID;  //  your network SSID (name)
@@ -99,7 +105,6 @@ static const char ntpServerName[] = "time.nist.gov";
 //static const char ntpServerName[] = "time-a.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
-const int timeZone = -4;
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
 //QuickStats stats; //initialize an instance of this class
@@ -112,6 +117,7 @@ const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
 const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
 void setup()
 {
+
 
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(WifiPin, OUTPUT);
@@ -160,7 +166,7 @@ void setup()
     delay(5000);
   }
   compass.enableDefault();
-  Serial.print("LSM303DLH setup complete !");
+  Serial.println("LSM303DLH setup complete !");
 
   //  pinMode(DRINTPin, INPUT_PULLUP);
   //  attachInterrupt(digitalPinToInterrupt(DRINTPin), DRAcc_ISR , RISING);
@@ -172,10 +178,15 @@ void setup()
     acc_y[k] = 0;
     acc_z[k] = 0;
   }
+
+  /* Starting values */
+  old_x = 0;
+  old_y = 0;
+  old_z = 0;
   RSLref = 32767;
-  IQRref = 50000.00;    // Interquiarlie value reference
-  ZCref = 32767;     // each axis Zero crossing sum reference
-  CAVref = 32767;    // Cumulative Acceleration vector reference
+  IQRref = 50000.00;
+  ZCref = 32767;
+  CAVref = 32767;
   ACNref = 32767;
   IQRmax = 0.0;
   IQRmin = 0.0;
@@ -185,107 +196,67 @@ void setup()
   ACNmin = 0;
   ZCmax = 0;
   ZCmin = 0;
-  delay(3000);
-  if (OFFSET) {
-    offset(50);
-  }
-  else {
-    filterOneHighpassX.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a o:qne pole (RC) highpass filter
-    filterOneHighpassY.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
-    filterOneHighpassZ.setFilter( HIGHPASS, testFrequency, 0.0 );  // create a one pole (RC) highpass filter
-    offset_x = 0;
-    offset_y = 0;
-    offset_z = 0;
-  }
   sample = 0;
+  prevsample = 0;
   parameterLap = now();
-  startTime = millis();
   sendTime = millis();
-  startSampling = millis();
   wifiLap = now();
-  digitalWrite(AccPin, LOW);
+  ntpmicro = millis();
+  startTime = millis();
+  DATASEND = false;
+  /* after 3 seconds calculate the offset */
+  delay(3000);
+  offset(50);  // 50 samples for the offset media
+  Serial.println();
+  /* start taking samples */
+  digitalWrite(AccPin, HIGH);
+
 }
 
+int psample = 0;
+int isamples = 0;
+bool ISCALC = true;
 void loop()
 {
-  compass.read();
-  if (!OFFSET) {
-    filterOneHighpassX.input(compass.a.x / 16);
-    filterOneHighpassY.input(compass.a.y / 16);
-    filterOneHighpassZ.input(compass.a.z / 16);
+  if (!accSampling(sample)) {
+    calcParam(sample);
+
+    if ((millis() - startTime) <= TST){
+      CalcRef(psample, ISCALC);
+      psample++;
+    }
+    Serial.println();
+    sample++;
   }
 
-  /* read values at sampling rate */
-  if (millis() - tiempo >= INTERVALO) {
 
-    if (sample == SAMPLES) {
-      Serial.print(millis() - startSampling);
-      Serial.print(" ");
-      digitalClockDisplay();
-      Serial.println();
-      startSampling = millis();
-      /* All over again */
-      sample = 0;
-      IQRmax = 0.0;
-      IQRmin = 0.0;
-      CAVmax = 0;
-      CAVmin = 0;
-      ACNmax = 0;
-      ACNmin = 0;
-      ZCmax = 0;
-      ZCmin = 0;
-      digitalWrite(LED_BUILTIN, LOW);
+  if (sample == SAMPLES)
+    sample = 0;
+
+  /* sync the milliseconds with ntp time */
+  if (timeStatus() != timeNotSet) {
+    if (now() != prevtime) { //update the display only if time has changed
+      prevtime = now();
+      ntpmicro = millis();
     }
-
-    tiempo = millis();
-    if (OFFSET) {
-      acc_x[sample] = 0.5 * (compass.a.x / 16 - offset_x) + 0.5 * old_x;
-      acc_y[sample] = 0.5 * (compass.a.y / 16 - offset_y) + 0.5 * old_y;
-      acc_z[sample] = 0.5 * (compass.a.z / 16 - offset_z) + 0.5 * old_z;
-    } else {
-      acc_x[sample] = 0.5 * (filterOneHighpassX.output()) + 0.5 * old_x;
-      acc_y[sample] = 0.5 * (filterOneHighpassY.output()) + 0.5 * old_y;
-      acc_z[sample] = 0.5 * (filterOneHighpassZ.output()) + 0.5 * old_z;
-    }
-    /* aceleracion neta (guardar decimales ) */
-    AccNetnow[sample] = sqrt(acc_x[sample] * acc_x[sample] + acc_y[sample] * acc_y[sample] + acc_z[sample] * acc_z[sample]) * 100;
-
-    MaxMinAcc();
-    calcParam();
-    MaxMinParam();
-
-    old_x = acc_x[sample];
-    old_y = acc_y[sample];
-    old_z = acc_z[sample];
-    /* Sampling end */
-    print_all();
-    sample++;
-    digitalWrite(LED_BUILTIN, LOW);
   }
   /* Sesim event detect and check every 1 TASD secs after first detection*/
-  if (millis() - sendTime >= TASD) {
+  if (DATASEND && ((millis() - startTime) >= TASD)) {
     if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
-      sendPost(ID, now(), ACNmax / 100, mag_t, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
+      //   sendPost(ID, now(), ACNmax, amaxm, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
     }
   }
-  /* paramater calcs at first TRST seconds */
-  if ((millis() - startTime) == TRST) {
-    calc_ref();
-    print_ref();
-    digitalClockDisplay();
-    digitalWrite(AccPin, HIGH);
-  }
-  /* parameter calcs every TRNM minutes and restore offset values */
-  if ((now() - parameterLap) == SECS_PER_MIN * TRNM) {
+
+  /* parameter calcs every TRNM minutes*/
+  if ((now() - parameterLap) == (SECS_PER_MIN * TRNM)) {
     parameterLap = now();
-    calc_ref();
     print_ref();
-    digitalClockDisplay();
   }
-  if ((now() - wifiLap) == SECS_PER_MIN * TWC) {
+
+  if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
     wifiLap = now();
     /* wait until wifi is connected*/
     while (WiFi.status() != WL_CONNECTED) {
@@ -297,40 +268,39 @@ void loop()
     Serial.println("");
   }
 }
-/* finds max aceleration values */
-void MaxMinAcc() {
 
-  if ( sample == 0) {
-    acc_xMax = abs(acc_x[sample]);
-    acc_yMax = abs(acc_y[sample]);
-    acc_zMax = abs(acc_z[sample]);
-    ACNmax = AccNetnow[sample];
-  }
+int accSampling(int _sample) {
+  // if (compass.isDataReady()) {
+  compass.read();
+  /* read values at sampling rate */
+  if (millis() - tiempo >= INTERVALO && _sample < SAMPLES) {
+    tiempo = millis();
+    digitalClockDisplay();
+    acc_x[_sample] = 0.5 * (compass.a.x / 16 - offset_x) + 0.5 * old_x;
+    acc_y[_sample] = 0.5 * (compass.a.y / 16 - offset_y) + 0.5 * old_y;
+    acc_z[_sample] = 0.5 * (compass.a.z / 16 - offset_z) + 0.5 * old_z;
+    old_x = acc_x[_sample];
+    old_y = acc_y[_sample];
+    old_z = acc_z[_sample];
 
-  short acc_xabs = abs(acc_x[sample]);
-  short acc_yabs = abs(acc_y[sample]);
-  short acc_zabs = abs(acc_z[sample]);
+    float aax = acc_x[_sample] * acc_x[_sample];
+    float aay = acc_y[_sample] * acc_y[_sample];
+    float aaz = acc_z[_sample] * acc_z[_sample];
 
-  if (AccNetnow[sample]  > ACNmax) {
-    ACNmax = AccNetnow[sample];
-    mag_t = sample;
+    AccNetnow[_sample] = sqrt(aax + aay + aaz) * 100.0; // net aceleration with 2 decimals integer
+    char line[30];
+    snprintf(line, sizeof(line), "%d %d %d %d %d  ", sample, acc_x[_sample], acc_y[_sample], acc_z[_sample], AccNetnow[_sample] );
+    Serial.print(line);
+    return 0;
   }
-  if (AccNetnow[sample] <= ACNmin) {
-    ACNmin = AccNetnow[sample];
-  }
-  if (acc_xabs > acc_xMax) {
-    acc_xMax =  acc_xabs;
-  }
-  if (acc_yabs > acc_yMax) {
-    acc_yMax = acc_yabs;
-  }
-  if (acc_zabs > acc_zMax) {
-    acc_zMax = acc_zabs;
-  }
+  //}
+  return 1;
+
 }
 
-/* Calcs CAV , RSL , IQR and ZC parameters */
-void calcParam() {
+/* Calcs CAV , RSL , IQR and ZC parameters and returns time
+   of the operation in milliseconds */
+time_t calcParam(int _sample) {
   float sumshort = 0;
   float sumlong = 0;
   float cavlong = 0;
@@ -346,16 +316,57 @@ void calcParam() {
   float yzcr = 0;
   float zzcr = 0;
   int temp[SAMPLES];
-  /* Parameter cals */
+  time_t startcalc;
+  short acc_xabs;
+  short acc_yabs;
+  short acc_zabs;
+
+
+  startcalc = millis();
+  acc_xabs = abs(acc_x[0]);
+  acc_yabs = abs(acc_y[0]);
+  acc_zabs = abs(acc_z[0]);
+
+  /* first values for max and min comparison */
+  acc_xMax = acc_xabs;
+  acc_yMax = acc_yabs;
+  acc_zMax = acc_zabs;
+  ACNmax = AccNetnow[0];
+
+  /* Sampling window analysis */
   for (int i = 1; i < SAMPLES; i++)
   {
+    /* Max and min comparison */
+    acc_xabs = abs(acc_x[i]);
+    acc_yabs = abs(acc_y[i]);
+    acc_zabs = abs(acc_z[i]);
+
+    if (AccNetnow[i]  > ACNmax) {
+      ACNmax = AccNetnow[i];
+      mag_t = i;
+      amaxm = (millis() - ntpmicro) % 1000;
+    }
+    if (AccNetnow[i] <= ACNmin) {
+      ACNmin = AccNetnow[i];
+    }
+    if ( acc_xabs > acc_xMax) {
+      acc_xMax =  acc_xabs;
+    }
+    if (acc_yabs > acc_yMax) {
+      acc_yMax = acc_yabs;
+    }
+    if (acc_zabs > acc_zMax) {
+      acc_zMax = acc_zabs;
+    }
+
+    /* CAV arrays */
     temp[i - 1] = AccNetnow[i - 1];
     sumlong += AccNetnow[i - 1];
     if (i >= SAMPLES - _smpl) {
       sumshort += AccNetnow[i - 1];
     }
-    // initialise two booleans indicating whether or not
-    // the current and previous sample are positive
+
+    /* ZC sum */
     xcurrent = (acc_x[i] > 0);
     xprevious = (acc_x[i - 1] > 0);
     ycurrent = (acc_y[i] > 0);
@@ -387,9 +398,78 @@ void calcParam() {
   RSL = (cavshort / cavlong) * 100.0; //
   sortArray(temp, SAMPLES);
   IQR = (temp[SAMPLES / 4 * 3 - 1] - temp[SAMPLES / 4 - 1]);
+
+  char line[160];
+  snprintf(line, sizeof(line), "%lu %d %d %d %d %lu %d %d %d %d ", (millis() - startcalc), acc_xMax, acc_yMax , acc_zMax, ACNmax , amaxm, ZC, IQR, CAV, RSL);
+  Serial.print(line);
+  return (millis() - startcalc);
 }
 
-void MaxMinParam() {
+int CalcRef(int _sample, bool _iscalc) {
+
+  if (_iscalc) {
+    if (_sample < SAMPLES * 2 ) {
+
+      if (_sample >= SAMPLES) {
+        if (IQR > IQRmax) {
+          IQRmax = IQR;
+        }
+        if (IQR <= IQRmin) {
+          IQRmin = IQR;
+        }
+        if (ZC > ZCmax) {
+          ZCmax = ZC;
+        }
+        if (ZC <= ZCmin) {
+          ZCmin = ZC;
+        }
+        if (CAV > CAVmax) {
+          CAVmax = CAV;
+        }
+        if (CAV <= CAVmin) {
+          CAVmin = CAV;
+        }
+        IQRref = (IQRmax - IQRmin) * Factor_IQR;
+        CAVref = (CAVmax - CAVmin) * Factor_CAV;
+        ACNref = (ACNmax - ACNmin) * Factor_ACN;
+        ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
+        RSLref = 145;
+        char line[160];
+        snprintf(line, sizeof(line), "Variable %d %d %d %d %d %d %d %d %d ", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
+        Serial.print(line);
+
+      } else {
+        IQRmax = IQR;
+        IQRmin = IQR;
+        ZCmax = ZC;
+        ZCmin = ZC;
+        CAVmax = CAV;
+        CAVmin = CAV;
+        char line[160];
+        snprintf(line, sizeof(line), "Fijo %d %d %d %d %d %d %d %d %d", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
+        Serial.print(line);
+      }
+
+      
+    } else { // end _sample < SAMPLES * 2  condition
+      DATASEND = true; //enable seism event
+    }
+
+  } else { // if _iscalc false use fixed reference
+    ACNref = (ACNmax - ACNmin) * Factor_ZC;
+    IQRref = 500;  // [mg] integer
+    CAVref = 1000; // [mg] integer
+    RSLref = 145;  // percent para medir la ligua
+    ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
+    DATASEND = true; //enable seism event
+
+  }
+
+  return 0;
+}
+
+void MaxMinRef() {
+
   if (IQR > IQRmax) {
     IQRmax = IQR;
   }
@@ -403,66 +483,30 @@ void MaxMinParam() {
     ZCmin = ZC;
   }
   if (CAV > CAVmax) {
-    ZCmax = ZC;
+    CAVmax = CAV;
   }
   if (CAV <= CAVmin) {
     CAVmin = CAV;
   }
+
+  char line[30];
+  snprintf(line, sizeof(line), " %d %d %d %d \n", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin);
+  digitalClockDisplay();
+  Serial.print(line);
 }
 
-//funcion para dividir el array y hacer los intercambios
-int dividir(int *array, int inicio, int fin)
-{
-  int izq;
-  int der;
-  int pibote;
-  int temp;
-
-  pibote = array[inicio];
-  izq = inicio;
-  der = fin;
-
-  //Mientras no se cruzen los índices
-  while (izq < der) {
-    while (array[der] > pibote) {
-      der--;
-    }
-
-    while ((izq < der) && (array[izq] <= pibote)) {
-      izq++;
-    }
-
-    // Si todavia no se cruzan los indices seguimos intercambiando
-    if (izq < der) {
-      temp = array[izq];
-      array[izq] = array[der];
-      array[der] = temp;
-    }
-  }
-
-  //Los indices ya se han cruzado, ponemos el pivote en el lugar que le corresponde
-  temp = array[der];
-  array[der] = array[inicio];
-  array[inicio] = temp;
-
-  //La nueva posición del pivote
-  return der;
+void InitRef() {
+  IQRmax = IQR;
+  IQRmin = IQR;
+  ZCmax = ZC;
+  ZCmin = ZC;
+  CAVmax = CAV;
+  CAVmin = CAV;
+  char line[30];
+  snprintf(line, sizeof(line), " %d %d %d %d \n", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin);
+  digitalClockDisplay();
+  Serial.print(line);
 }
-
-//            Funcion Quicksort
-//======================================================================
-//funcion recursiva para hacer el ordenamiento
-void quicksort(int *array, int inicio, int fin)
-{
-  int pivote;
-  if (inicio < fin)
-  {
-    pivote = dividir(array, inicio, fin );
-    quicksort( array, inicio, pivote - 1 );//ordeno la lista de los menores
-    quicksort( array, pivote + 1, fin );//ordeno la lista de los mayores
-  }
-}
-
 void DRAcc_ISR () {
 
 }
@@ -476,40 +520,28 @@ void restore_parameters() {
   ACNmin = 0;
   ZCmax = 0;
   ZCmin = 0;
+}
 
-}
-void calc_ref() {
-  if (REF_VAR) {
-    IQRref = (IQRmax - IQRmin) * Factor_IQR;
-    CAVref = (CAVmax - CAVmin) * Factor_CAV;
-    ACNref = (ACNmax - ACNmin) * Factor_ACN;
-    ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
-    RSLref = 145;
-  } else {
-    ACNref = (ACNmax - ACNmin) * Factor_ZC;
-    IQRref = 5000;
-    CAVref = 10000;
-    RSLref = 145;
-    ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
-  }
-}
 
 void offset(int samples) {
   int j = 0;
   while (j < samples) {
-    compass.read();
-    if (millis() - tiempo >= INTERVALO) {
-      tiempo = millis();
-      offset_x += compass.a.x / 16;
-      offset_y += compass.a.y / 16;
-      offset_z += compass.a.z / 16;
-      j++;
+    if (compass.isDataReady()) {
+      compass.read();
+      if (millis() - tiempo >= INTERVALO) {
+        tiempo = millis();
+        offset_x += compass.a.x / 16;
+        offset_y += compass.a.y / 16;
+        offset_z += compass.a.z / 16;
+        j++;
+      }
     }
   }
   offset_x = offset_x / samples;
   offset_y = offset_y / samples;
   offset_z = offset_z / samples;
 }
+
 /* Ip geolotacion */
 void getGeo() {
 
@@ -598,8 +630,7 @@ void getGeo() {
   client.stop();
 }
 
-
-int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
+int sendPost(byte _id, time_t _tiempo, short _amax, time_t _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
 
   WiFiClient client; // Use WiFiClient class to create TCP connections
   HTTPClient http;
@@ -608,7 +639,7 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     http.begin("http://prosismic.zeke.cl/registrarEvento"); //HTTP
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
-    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav, longitude, latitude);
+    snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo, (millis() - ntpmicro) % 1000, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav, latitude, longitude);
     int httpCode = http.POST(line);
     Serial.print(line);
     String payload = http.getString();
@@ -624,13 +655,20 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     return 1;
   }
 }
-void print_all(){
-   //   print_acc_values();
-   //   Serial.print("\t");
-      print_parameter();
-      Serial.print("\t");
-      print_ref();
-      Serial.println();
+
+void print_all_raw(int _sample) {
+  digitalClockDisplay();
+  Serial.print("  ");
+  Serial.print(_sample);
+  Serial.print("   ");
+  print_acc_raw();
+  Serial.print("   ");
+  print_acc_values_raw(_sample);
+  Serial.print("   ");
+  print_mag(_sample);
+  Serial.print("\t");
+  print_parameter_raw();
+
 }
 void print_parameter() {
   Serial.print("IQR");
@@ -652,57 +690,27 @@ void print_parameter() {
   Serial.print("RSL");
   Serial.print("    ");
   Serial.print(RSL);
-
 }
 
-void print_parameter_raw() {
-
-  Serial.print(IQR);
-  Serial.print(" ");
-  Serial.print(CAV);
-  Serial.print(" ");
-  Serial.print(ZC);
-  Serial.print(" ");
-  Serial.print(ACNmax);
-
-}
-void print_acc_values() {
+void print_acc_values(int _sample) {
   Serial.print("x-axis");
   Serial.print("   ");
-  Serial.print(acc_x[sample]);
+  Serial.print(acc_x[_sample]);
   Serial.print("   ");
   Serial.print("y-axis");
   Serial.print("   ");
-  Serial.print(acc_y[sample]);
+  Serial.print(acc_y[_sample]);
   Serial.print("   ");
   Serial.print("z-axis");
   Serial.print("   ");
-  Serial.print(acc_z[sample]);
+  Serial.print(acc_z[_sample]);
   Serial.print("   ");
   Serial.print("NA");
   Serial.print("    ");
-  Serial.print(AccNetnow[sample]);
+  Serial.print(AccNetnow[_sample]);
 }
-void print_acc_values_raw() {
 
-  Serial.print(acc_x[sample]);
-  Serial.print(" ");
-  Serial.print(acc_y[sample]);
-  Serial.print(" ");
-  Serial.print(acc_z[sample]);
-  Serial.print(" ");
-  Serial.print(AccNetnow[sample]);
-}
-void print_ref_raw() {
 
-  Serial.print(IQRref);
-  Serial.print(" ");
-  Serial.print(CAVref);
-  Serial.print(" ");
-  Serial.print(ZCref);
-  Serial.print(" ");
-  Serial.print(ACNref);
-}
 void print_ref() {
   Serial.print("IQRref");
   Serial.print("  ");
@@ -716,28 +724,72 @@ void print_ref() {
   Serial.print("  ");
   Serial.print(ZCref);
   Serial.print("  ");
-  Serial.print("ACNref");
-  Serial.print("  ");
-  Serial.print(ACNref);
-  Serial.print("  ");
   Serial.print("RSLref");
   Serial.print("  ");
   Serial.print(RSLref);
 }
 
+void print_parameter_raw() {
+  Serial.print(IQR);
+  Serial.print("\t");
+  Serial.print(CAV);
+  Serial.print("\t");
+  Serial.print(ZC);
+  Serial.print("\t");
+  Serial.print(ACNmax);
+  Serial.print("\t");
+  Serial.print(RSL);
+}
+
+void print_acc_values_raw(int _sample) {
+
+  Serial.print(acc_x[_sample]);
+  Serial.print("   ");
+  Serial.print(acc_y[_sample]);
+  Serial.print("   ");
+  Serial.print(acc_z[_sample]);
+  Serial.print("   ");
+}
+
+void print_acc_raw() {
+
+  Serial.print(compass.a.x);
+  Serial.print("   ");
+  Serial.print(compass.a.y);
+  Serial.print("   ");
+  Serial.print(compass.a.z);
+  Serial.print("   ");
+}
+
+void print_ref_raw() {
+
+  Serial.print(IQRref);
+  Serial.print(" ");
+  Serial.print(CAVref);
+  Serial.print(" ");
+  Serial.print(ZCref);
+  Serial.print(" ");
+  Serial.print(ACNref);
+}
+void print_mag(int _sample) {
+  Serial.print(AccNetnow[_sample]);
+}
+
 void digitalClockDisplay()
 {
-  // digital clock display of the time
+  Serial.print(" ");
+  Serial.print(day());
+  Serial.print("/");
+  Serial.print(month());
+  Serial.print("/");
+  Serial.print(year());
+  Serial.print(" ");
   Serial.print(hour());
   printDigits(minute());
   printDigits(second());
-  Serial.print(" ");
-  Serial.print(day());
   Serial.print(".");
-  Serial.print(month());
-  Serial.print(".");
-  Serial.print(year());
-  Serial.print(" ");
+  printmillisntp(millis());
+  Serial.print("   ");
 }
 
 void printDigits(int digits)
@@ -748,7 +800,10 @@ void printDigits(int digits)
     Serial.print('0');
   Serial.print(digits);
 }
-
+void printmillisntp(time_t _millis) {
+  Serial.print((_millis - ntpmicro) % 1000);
+  Serial.print("   ");
+}
 
 
 /*-------- NTP code ----------*/
@@ -780,7 +835,8 @@ time_t getNtpTime()
       secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
       secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
       secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+      //return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+      return secsSince1900 - 2208988800UL;
     }
   }
   Serial.println("No NTP Response :-(");

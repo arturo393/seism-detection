@@ -22,8 +22,14 @@
 #define Factor_ZC   0.25      // Zero Crossing rate reference factor
 #define Factor_RSL  7
 #define StartWindow 20
-#define _SSID "Isidora."   // network name
-#define _NETPASS "copito213" // network password    
+//#define _SSID "katyred"  // network name
+//#define _NETPASS "katynoseanflaites" // network password
+//#define _SSID "zekefi-interno"  // network name
+//#define _NETPASS "JtXDF5jK79es" // network password    
+//#define _SSID "VTR-3040015."   // network name
+//#define _NETPASS "r6msMmgncj6x" // network password
+#define _SSID "Familia"   // network name
+#define _NETPASS "1234familia" // network password
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR false            // indicate if reference are variables or fixed values
 
@@ -46,12 +52,15 @@ unsigned int INTERVALO = (1000 / FrecRPS); // ms
 time_t tiempo;        // ?
 time_t startSampling; // when a new simpling windwow start
 time_t eventStart;    // when a calculation windwos start
-time_t windowStart;   // ?
+time_t prevtime;      // time for check every one second
 time_t startTime;     // time after setup() if finished
 time_t parameterLap;  // time between reference recalculation
 time_t sendTime;      // when an event start
 time_t wifiLap;       // counter time for wifi check
-
+time_t ntpmicro;      // ntp microseconds
+time_t deltasampling;  // time of 1 sampling
+time_t eventAccion;   // time after event is on
+time_t amaxm;         // millsecond of the max acceleration
 /* accelerometer parameters and variables  */
 int sample;                // sample index
 ADXL345 accelerometer;
@@ -214,13 +223,16 @@ void loop()
   /* read values at sampling rate */
   if (millis() - tiempo >= INTERVALO) {
     if (sample == SAMPLES) {
-      Serial.print(millis() - startSampling);
+   /*   Serial.print(millis() - startSampling);
       Serial.print(" ");
       digitalClockDisplay();
       Serial.println();
       startSampling = millis();
+     */
       /* All over again */
+      
       sample = 0;
+      /*
       IQRmax = 0.0;
       IQRmin = 0.0;
       CAVmax = 0;
@@ -229,6 +241,7 @@ void loop()
       ACNmin = 0;
       ZCmax = 0;
       ZCmin = 0;
+     */
       digitalWrite(LED_BUILTIN, LOW);
     }
     tiempo = millis();
@@ -248,24 +261,40 @@ void loop()
     calcParam();
     MaxMinParam();
 
-    print_acc_values();
+    //  print_acc_values();
     old_x = acc_x[sample];
     old_y = acc_y[sample];
     old_z = acc_z[sample];
     /* Sampling end */
- //   print_all();
+     //  print_all();
+    
+    print_acc_values_raw();
+    Serial.println();
     sample++;
+    deltasampling=millis()-eventStart;
+    eventStart= millis();
     digitalWrite(LED_BUILTIN, LOW);
   }
+
+  if (timeStatus() != timeNotSet) {
+    if (now() != prevtime) { //update the display only if time has changed
+      prevtime = now();
+      ntpmicro = millis();
+    }
+  }
+  
   /* Sesim event detect and check every 1 TASD secs after first detection*/
   if (millis() - sendTime >= TASD) {
     if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+      eventAccion=millis();
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
-      sendPost(ID, now(), ACNmax, mag_t, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
+      sendPost(ID, now(), ACNmax, amaxm, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
+      Serial.println(millis()-eventAccion);
     }
   }
+  
   /* paramater calcs at first TRST seconds */
   if ((now() - startTime) == TRST) {
     calc_ref();
@@ -292,6 +321,8 @@ void loop()
     digitalWrite(WifiPin, HIGH);
     Serial.println("");
   }
+
+
 }
 
 /* finds max aceleration values */
@@ -311,6 +342,8 @@ void MaxMinAcc() {
   if (AccNetnow[sample]  > ACNmax) {
     ACNmax = AccNetnow[sample];
     mag_t = sample;
+    amaxm = (millis()-ntpmicro)%1000;
+    
   }
   if (AccNetnow[sample] <= ACNmin) {
     ACNmin = AccNetnow[sample];
@@ -482,14 +515,14 @@ void calc_ref() {
     IQRref = (IQRmax - IQRmin) * Factor_IQR;
     CAVref = (CAVmax - CAVmin) * Factor_CAV;
     ACNref = (ACNmax - ACNmin) * Factor_ACN;
-    ZCref = ZCmax - ZCmin * Factor_ACN;
+    ZCref = ZCmax - ZCmin * Factor_ZC;
     RSLref = (RSLref - RSLref) * Factor_RSL;
   } else {
     ACNref = (ACNmax - ACNmin) * Factor_ACN;
     IQRref = 5000;
     CAVref = 10000;
-    RSLref = 145;
-    ZCref = ZCmax - ZCmin * Factor_ACN;;
+    RSLref = 145;  // ~152
+    ZCref = ZCmax - ZCmin * Factor_ZC;
   }
 }
 /* Media axis acc calc */
@@ -599,24 +632,23 @@ void getGeo() {
   client.stop();
 }
 
-int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
-
-  WiFiClient client; // Use WiFiClient class to create TCP connections
+int sendPost(byte _id, time_t _tiempo, short _amax, time_t _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
+  
   HTTPClient http;
   if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
     digitalWrite(WifiPin, HIGH);
     http.begin("http://prosismic.zeke.cl/registrarEvento"); //HTTP
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
-    snprintf(line, sizeof(line), "%d;%lu;%d;%d;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav, latitude, longitude);
+    snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo,(millis()-ntpmicro)%1000, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav, latitude, longitude);
     int httpCode = http.POST(line);
-    Serial.print(line);
-    String payload = http.getString();
+//    Serial.print(line);
+  //  String payload = http.getString();
     http.end();
-    Serial.print("   httpCode  ");
-    Serial.print(httpCode);   //Print HTTP return code
-    Serial.print("   payload  ");
-    Serial.println(payload);    //Print request response payload
+//    Serial.print("   httpCode  ");
+//    Serial.println(httpCode);   //Print HTTP return code
+//    Serial.print("   payload  ");
+//    Serial.println(payload);    //Print request response payload
     return 0;
   } else {
     digitalWrite(WifiPin, LOW);
@@ -624,9 +656,19 @@ int sendPost(byte _id, time_t _tiempo, short _amax, short _tamax, short _ax, sho
     return 1;
   }
 }
+
+void printmsecs(){
+  time_t _time = millis()-ntpmicro;
+  Serial.print(now());
+  Serial.print(".");
+  Serial.print(_time%1000);
+  
+}
 void print_all() {
-  //   print_acc_values();
-  //   Serial.print("\t");
+  printmsecs();
+  Serial.print("\t");
+  print_acc_values();
+  Serial.print("\t");
   print_parameter();
   Serial.print("\t");
   print_ref();
@@ -732,6 +774,8 @@ void digitalClockDisplay()
   Serial.print(hour());
   printDigits(minute());
   printDigits(second());
+  Serial.print(".");
+  Serial.print(millis() - ntpmicro);
   Serial.print(" ");
   Serial.print(day());
   Serial.print(".");
