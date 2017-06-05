@@ -30,14 +30,6 @@
 int WifiPin = D7;     // wifi status LED
 int AccPin = D6;      // accelerometer data readings LED
 
-/* one pole filter variables */
-float testFrequency = 1;                     // test signal frequency (Hz)
-float testAmplitude = 100;                   // test signal amplitude
-float testOffset = 100;
-FilterOnePole filterOneHighpassX;
-FilterOnePole filterOneHighpassY;
-FilterOnePole filterOneHighpassZ;
-
 /* Sampling freq */
 #define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
 unsigned int INTERVALO = (1000 / FrecRPS); // s
@@ -57,6 +49,7 @@ time_t startTime;
 int psample;  // sample counter for parameters calculation
 bool ISCALC;  // parameter calculation enable/disable
 bool EVENT;             // event detection on/off
+bool PARAMCALC; // parameter calculation event
 int eventsample = 0 ; // samples after first event detected
 bool DATASEND;             // enable/disable send event to server
 int sample;                // sample index
@@ -163,7 +156,6 @@ void setup()
   /* geolocation config */
   getGeo();
 
-
   /* acclereometer setup , see library for details */
   while (!compass.init()) {
     Serial.println("LSM303DLH not setup, check device !");
@@ -210,8 +202,9 @@ void setup()
   ntpmicro = millis();
   startTime = millis();
   DATASEND = false;
-  ISCALC = true;
+  ISCALC = false;
   EVENT = false;
+    PARAMCALC = true;
   /* after 3 seconds calculate the offset */
   delay(3000);
   offset(50);  // 50 samples for the offset media
@@ -229,9 +222,10 @@ void loop()
   if (!accSampling(sample)) {
     calcParam(sample);
 
-    if ( !DATASEND && (millis() - startTime) <= TST) {
+    if ( PARAMCALC && !DATASEND && (millis() - startTime) <= TST) {
       if (CalcRef(psample, ISCALC)) {
         DATASEND = true; //enable seism event
+        PARAMCALC = false;
       } else {
         psample++;// parameter calculator counter
       }
@@ -278,6 +272,12 @@ void loop()
         DATASEND = false;
         EVENT = true;
         digitalWrite(LED_BUILTIN, LOW);
+        digitalWrite(AccPin, HIGH);
+      }
+      else {
+        Serial.print("cannot send event");
+        digitalWrite(AccPin, LOW);
+        digitalWrite(LED_BUILTIN, LOW);
       }
       Serial.println();
     }
@@ -305,6 +305,7 @@ void loop()
   }
 }
 
+/* sampling every INTERVALO and SAMPLES times */
 int accSampling(int _sample) {
   // if (compass.isDataReady()) {
   compass.read();
@@ -331,7 +332,6 @@ int accSampling(int _sample) {
   }
   //}
   return 1;
-
 }
 
 /* Calcs CAV , RSL , IQR and ZC parameters and returns time
@@ -497,8 +497,9 @@ int CalcRef(int _sample, bool _iscalc) {
     IQRref = 500;  // [mg] integer
     CAVref = 1000; // [mg] integer
     RSLref = 145;  // percent para medir la ligua
-    ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
+    ZCref =  22;
     DATASEND = true; //enable seism event
+    return 1;
 
   }
 
@@ -683,11 +684,14 @@ int sendPost() {
     int httpCode = http.POST(line);
     String payload = http.getString();
     http.end();
-    Serial.print("   httpCode  ");
-    Serial.print(httpCode);   //Print HTTP return code
+    if (payload.equals("1\n")){
+      return 0;
+    } 
+    else {
     Serial.print("   payload  ");
     Serial.print(payload);    //Print request response payload
-    return 0;
+      return 1;
+    }
   } else {
     digitalWrite(WifiPin, LOW);
     Serial.println("Error in WiFi connection");
