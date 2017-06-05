@@ -11,7 +11,7 @@
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
 #define ID 4                  // device number identification
-#define TRNM 86400UL             // Parameter in between windwos time in min
+#define TRNM 8UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
 #define TASD 1000               // time after send data in msecs
@@ -54,6 +54,10 @@ time_t amaxm;         // millsecond of the max acceleration
 time_t startTime;
 
 /* accelerometer parameters and variables  */
+int psample;  // sample counter for parameters calculation
+bool ISCALC;  // parameter calculation enable/disable
+bool EVENT;             // event detection on/off
+int eventsample = 0 ; // samples after first event detected
 bool DATASEND;             // enable/disable send event to server
 int sample;                // sample index
 int prevsample;
@@ -198,38 +202,61 @@ void setup()
   ZCmin = 0;
   sample = 0;
   prevsample = 0;
+  psample = 0;
+  eventsample = 0 ; // samples after first event detected
   parameterLap = now();
   sendTime = millis();
   wifiLap = now();
   ntpmicro = millis();
   startTime = millis();
   DATASEND = false;
+  ISCALC = true;
+  EVENT = false;
   /* after 3 seconds calculate the offset */
   delay(3000);
   offset(50);  // 50 samples for the offset media
   Serial.println();
   /* start taking samples */
   digitalWrite(AccPin, HIGH);
+  digitalWrite(LED_BUILTIN, LOW);
 
 }
 
-int psample = 0;
-int isamples = 0;
-bool ISCALC = true;
+
+
 void loop()
 {
   if (!accSampling(sample)) {
     calcParam(sample);
 
-    if ((millis() - startTime) <= TST){
-      CalcRef(psample, ISCALC);
-      psample++;
+    if ( !DATASEND && (millis() - startTime) <= TST) {
+      if (CalcRef(psample, ISCALC)) {
+        DATASEND = true; //enable seism event
+      } else {
+        psample++;// parameter calculator counter
+      }
+    }
+
+    /* count samples for restore event detector */
+    if (EVENT) {
+      Serial.print("  Pause even for ");
+      Serial.print(SAMPLES / 2 - eventsample);
+      Serial.print(" samples");
+      eventsample++;
+      digitalWrite(LED_BUILTIN, HIGH);
     }
     Serial.println();
-    sample++;
+    sample++; // window sample counter
   }
 
-
+  /* check if event count complete */
+  if (eventsample == SAMPLES / 2) {
+    eventsample = 0;
+    DATASEND = true;
+    EVENT = false;
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+  /* restore sampling window */
   if (sample == SAMPLES)
     sample = 0;
 
@@ -240,22 +267,31 @@ void loop()
       ntpmicro = millis();
     }
   }
+
   /* Sesim event detect and check every 1 TASD secs after first detection*/
-  if (DATASEND && ((millis() - startTime) >= TASD)) {
+  if (DATASEND) {
     if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
-      //   sendPost(ID, now(), ACNmax, amaxm, acc_xMax , acc_yMax, acc_zMax, ZC, IQR, CAV);
+      if (!sendPost()) {
+        DATASEND = false;
+        EVENT = true;
+        digitalWrite(LED_BUILTIN, LOW);
+      }
+      Serial.println();
     }
   }
 
   /* parameter calcs every TRNM minutes*/
-  if ((now() - parameterLap) == (SECS_PER_MIN * TRNM)) {
+ /* if (!PARAMCALC && (now() - parameterLap) == (SECS_PER_HOUR * TRNM)) {
+    startTime = millis();
     parameterLap = now();
-    print_ref();
-  }
-
+    psample = 0;
+    DATASEND = false;
+    PARAMCALC = true;
+   }
+*/
   if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
     wifiLap = now();
     /* wait until wifi is connected*/
@@ -450,9 +486,10 @@ int CalcRef(int _sample, bool _iscalc) {
         Serial.print(line);
       }
 
-      
+
     } else { // end _sample < SAMPLES * 2  condition
-      DATASEND = true; //enable seism event
+
+      return 1;
     }
 
   } else { // if _iscalc false use fixed reference
@@ -630,24 +667,26 @@ void getGeo() {
   client.stop();
 }
 
-int sendPost(byte _id, time_t _tiempo, short _amax, time_t _tamax, short _ax, short _ay, short _az, short _zc, short _iq, short _cav) {
+int sendPost() {
 
   WiFiClient client; // Use WiFiClient class to create TCP connections
   HTTPClient http;
   if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
-    digitalWrite(WifiPin, HIGH);
     http.begin("http://prosismic.zeke.cl/registrarEvento"); //HTTP
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
-    snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s", _id, _tiempo, (millis() - ntpmicro) % 1000, _amax, _tamax, _ax, _ay, _az, _zc, _iq, _cav, latitude, longitude);
-    int httpCode = http.POST(line);
+    snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s",
+             ID, now(), (millis() - ntpmicro) % 1000, ACNmax, amaxm, acc_xMax, acc_yMax, acc_zMax,
+             ZC, IQR, CAV, latitude, longitude);
+    Serial.print("Event ");
     Serial.print(line);
+    int httpCode = http.POST(line);
     String payload = http.getString();
     http.end();
     Serial.print("   httpCode  ");
     Serial.print(httpCode);   //Print HTTP return code
     Serial.print("   payload  ");
-    Serial.println(payload);    //Print request response payload
+    Serial.print(payload);    //Print request response payload
     return 0;
   } else {
     digitalWrite(WifiPin, LOW);
