@@ -10,7 +10,7 @@
 
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
-#define ID 2                  // device number identification
+#define ID 5                  // device number identification
 #define TRNM 8UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
@@ -24,14 +24,16 @@
 #define StartWindow 20
 //#define _SSID "zekefi-interno"  // network name
 //#define _NETPASS "JtXDF5jK79es" // network password    
-#define _SSID "VTR-3040015"   // network name
-#define _NETPASS "r6msMmgncj6x" // network password
+#define _SSID "zekefi"  // network name
+#define _NETPASS "0000000000001500000000000015" // network password    
+//#define _SSID "VTR-3040015"   // network name+
+//#define _NETPASS "r6msMmgncj6x" // network password
 
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR  false          // indicate if reference are variables or fixed values
 
-int WifiPin = D7;     // wifi status LED
-int AccPin = D6;      // accelerometer data readings LED
+int WifiPin = D6;     // wifi status LED
+int AccPin = D7;      // accelerometer data readings LED
 
 /* Sampling freq */
 #define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
@@ -112,7 +114,8 @@ unsigned int localPort = 8888;  // local port to listen for UDP packets
 //QuickStats stats; //initialize an instance of this class
 
 /* geolocation variables */
-const char* host = "freegeoip.net";        // host where the ip is get it
+//const char* host = "freegeoip.net";        // host where the ip is get it
+const char* host ="ip-api.com";
 char latitude[32];                         // latitude value from host
 char longitude[32];                        // longitude value from host
 const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
@@ -663,8 +666,8 @@ void getGeo() {
   }
 
   // Here were copy the strings we're interested in
-  strcpy(latitude, root["latitude"]);
-  strcpy(longitude, root["longitude"]);
+  strcpy(latitude, root["lat"]);
+  strcpy(longitude, root["lon"]);
   // It's not mandatory to make a copy, you could just use the pointers
   // Since, they are pointing inside the "content" buffer, so you need to make
   // sure it's still in memory when you read the string

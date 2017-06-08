@@ -107,7 +107,8 @@ unsigned int localPort = 8888;  // local port to listen for UDP packets
 //QuickStats stats; //initialize an instance of this class
 
 /* geolocation variables */
-const char* host = "freegeoip.net";        // host where the ip is get it
+//const char* host = "freegeoip.net";        // host where the ip is get it
+const char* host ="ip-api.com";
 char latitude[32];                         // latitude value from host
 char longitude[32];                        // longitude value from host
 const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
@@ -654,8 +655,8 @@ void getGeo() {
   }
 
   // Here were copy the strings we're interested in
-  strcpy(latitude, root["latitude"]);
-  strcpy(longitude, root["longitude"]);
+  strcpy(latitude, root["lat"]);
+  strcpy(longitude, root["lon"]);
   // It's not mandatory to make a copy, you could just use the pointers
   // Since, they are pointing inside the "content" buffer, so you need to make
   // sure it's still in memory when you read the string
