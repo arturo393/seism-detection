@@ -7,10 +7,18 @@
 #include <ESP8266HTTPClient.h>
 #include <ArduinoSort.h>
 #include <ArduinoJson.h>
+#include <WifiLocation.h>
+/*
 
+  ID 1 = "Pato"
+  ID 2 = "Isi"
+  ID 3 = "Arturo"
+  ID 4 = "Zeke I+D"
+  ID 5 = "Zeke Stgo"
+*/
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
-#define ID 2                  // device number identification
+#define ID 1                  // device number identification
 #define TRNM 8UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
@@ -23,11 +31,15 @@
 #define Factor_RSL  7
 #define StartWindow 20
 //#define _SSID "zekefi-interno"  // network name
-//#define _NETPASS "JtXDF5jK79es" // network password    
+//#define _NETPASS "JtXDF5jK79es" // network password
+//#define _SSID "katyred"  // network name
+//#define _NETPASS "katynoseanflaites" // network password
 #define _SSID "Familia"   // network name
 #define _NETPASS "1234familia" // network password
 //#define _SSID "zekefi"  // network name
-//#define _NETPASS "0000000000001500000000000015" // network password    
+//#define _NETPASS "0000000000001500000000000015" // network password
+//#define _SSID "VTR-3040015"   // network name+
+//#define _NETPASS "r6msMmgncj6x" // network password
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR  false          // indicate if reference are variables or fixed values
 
@@ -59,6 +71,7 @@ bool DATASEND;             // enable/disable send event to server
 int sample;                // sample index
 int prevsample;               // sample index
 MMA8452Q accel;
+short trigger;                      // 0:notrigger / 1:RSL / 2:ZIC           
 long offset_x, offset_y, offset_z; // offset data for normalization
 short old_x, old_y, old_z;         // old acceleration data for normalization
 short ACC_sample[3];              // [0] = x_acc [1] = y_acc [z] = z_acc
@@ -110,11 +123,16 @@ WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
 //QuickStats stats;               //initialize an instance of this class
 /* geolocation variables */
-const char* host = "freegeoip.net";        // host where the ip is get it
+//const char* host = "freegeoip.net";        // host where the ip is get it
+const char* host = "ip-api.com";      // host where the ip is get it
+const char* googleApiKey = "AIzaSyDrRpRVLNpwu9GsMMB4XyAbE8JrNLG9d98";
+WifiLocation location(googleApiKey);
+location_t loc;
 char latitude[32];                         // latitude value from host
 char longitude[32];                        // longitude value from host
 const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
 const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
+
 
 void setup()
 {
@@ -125,7 +143,7 @@ void setup()
 
   Serial.begin(500000);
   // Wire.begin(int sda, int scl)
-//  Wire.begin(4, 5);       // join i2c bus (address optional for master)
+  //  Wire.begin(4, 5);       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
   Serial.println("Prosismic");
@@ -156,7 +174,15 @@ void setup()
   Serial.print("Current time: ");
   digitalClockDisplay();
   /* geolocation config */
-  getGeo();
+  /* geolocation config */
+  loc = location.getGeoFromWiFi();
+  dtostrf(loc.lat, 7 , 5, latitude); // Leave room for too large numbers!
+  dtostrf(loc.lon, 7 , 5, longitude); // Leave room for too large numbers!
+  Serial.println("Location request data");
+  Serial.println(location.getSurroundingWiFiJson());
+  Serial.println(latitude);
+  Serial.println(longitude);
+  Serial.println("Accuracy: " + String(loc.accuracy));
   /* acclereometer setup , see library for details */
   Serial.println("MMA8452Q setup !");
   while (!accel.init(SCALE_2G, ODR_400)) {
@@ -166,7 +192,7 @@ void setup()
   Serial.println("MMA8452Q setup complete !");
   //  pinMode(DRINTPin, INPUT_PULLUP);
   //  attachInterrupt(digitalPinToInterrupt(DRINTPin), DRAcc_ISR , RISING);
-/* Starting values */
+  /* Starting values */
   old_x = 0;
   old_y = 0;
   old_z = 0;
@@ -209,7 +235,7 @@ void loop()
 {
   if (!accSampling(sample)) {
     calcParam(sample);
-
+trigger = 0;
     if ( PARAMCALC && !DATASEND && (millis() - startTime) <= TST) {
       if (CalcRef(psample, ISCALC)) {
         DATASEND = true; //enable seism event
@@ -252,7 +278,10 @@ void loop()
 
   /* Sesim event detect and check every 1 TASD secs after first detection*/
   if (DATASEND) {
-    if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+     trigger = 0;
+    if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+      if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
+      if (RSL >= RSLref)  trigger = 1;
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
@@ -300,9 +329,9 @@ int accSampling(int _sample) {
   if (millis() - tiempo >= INTERVALO && _sample < SAMPLES) {
     tiempo = millis();
     digitalClockDisplay();
-      acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
-      acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
-      acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
+    acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
+    acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
+    acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
     old_x = acc_x[_sample];
     old_y = acc_y[_sample];
     old_z = acc_z[_sample];
@@ -423,9 +452,9 @@ time_t calcParam(int _sample) {
   IQR = (temp[SAMPLES / 4 * 3 - 1] - temp[SAMPLES / 4 - 1]);
 
   char line[160];
-  snprintf(line, sizeof(line), "%lu %d %d %d %d %lu %d %d %d %d ", (millis() - startcalc), acc_xMax, acc_yMax , acc_zMax, ACNmax , amaxm, ZC, IQR, CAV, RSL);
+  snprintf(line, sizeof(line), "%lu %d %d %d %d %lu %d %d %d %d ", (millis() - startcalc), acc_xMax, acc_yMax , acc_zMax, ACNmax , trigger, ZC, IQR, CAV, RSL);
   Serial.print(line);
-  snprintf(line, sizeof(line), " %d %d %d %d ", ZCref, IQRref, CAVref,RSLref);
+  snprintf(line, sizeof(line), " %d %d %d %d ", ZCref, IQRref, CAVref, RSLref);
   Serial.print(line);
   return (millis() - startcalc);
 }
@@ -485,10 +514,10 @@ int CalcRef(int _sample, bool _iscalc) {
     ACNref = (ACNmax - ACNmin) * Factor_ZC;
     IQRref = 500;  // [mg] integer
     CAVref = 1000; // [mg] integer
-    RSLref = 145;  // percent para medir la ligua
+    RSLref = 250;  // percent para medir la ligua
     ZCref =  22;
     char line[160];
-    snprintf(line, sizeof(line), "Param fijo %d %d %d %d ", ZCref, IQRref, CAVref,RSLref);
+    snprintf(line, sizeof(line), "Param fijo %d %d %d %d ", ZCref, IQRref, CAVref, RSLref);
     Serial.print(line);
     DATASEND = true; //enable seism event
     return 1;
@@ -557,7 +586,7 @@ void offset(int samples) {
   int j = 0;
   while (j < samples) {
     //    if (compass.isDataReady()) {
-     accel.readRaw();
+    accel.readRaw();
     if (millis() - tiempo >= INTERVALO) {
       tiempo = millis();
       offset_x += accel.x;
@@ -647,8 +676,8 @@ void getGeo() {
   }
 
   // Here were copy the strings we're interested in
-  strcpy(latitude, root["latitude"]);
-  strcpy(longitude, root["longitude"]);
+  strcpy(latitude, root["lat"]);
+  strcpy(longitude, root["lon"]);
   // It's not mandatory to make a copy, you could just use the pointers
   // Since, they are pointing inside the "content" buffer, so you need to make
   // sure it's still in memory when you read the string
