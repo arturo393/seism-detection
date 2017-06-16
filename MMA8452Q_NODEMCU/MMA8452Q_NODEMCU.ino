@@ -12,13 +12,13 @@
 
   ID 1 = "Pato"
   ID 2 = "Isi"
-  ID 3 = "Arturo"
+  ID 3 = "Chrysalis"
   ID 4 = "Zeke I+D"
   ID 5 = "Zeke Stgo"
 */
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
-#define ID 1                  // device number identification
+#define ID 3                  // device number identification
 #define TRNM 8UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
@@ -30,12 +30,15 @@
 #define Factor_ZC   0.25      // Zero Crossing rate reference factor
 #define Factor_RSL  7
 #define StartWindow 20
+
+#define _SSID "PUCV-PRO"  // network name
+#define _NETPASS "fkralfews6i17" // network password
 //#define _SSID "zekefi-interno"  // network name
 //#define _NETPASS "JtXDF5jK79es" // network password
 //#define _SSID "katyred"  // network name
 //#define _NETPASS "katynoseanflaites" // network password
-#define _SSID "Familia"   // network name
-#define _NETPASS "1234familia" // network password
+//#define _SSID "Familia"   // network name
+//#define _NETPASS "1234familia" // network password
 //#define _SSID "zekefi"  // network name
 //#define _NETPASS "0000000000001500000000000015" // network password
 //#define _SSID "VTR-3040015"   // network name+
@@ -43,8 +46,8 @@
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR  false          // indicate if reference are variables or fixed values
 
-int WifiPin = D7;     // wifi status LED
-int AccPin = D6;      // accelerometer data readings LED
+int WifiPin = D8;     // wifi status LED
+int AccPin = D7;      // accelerometer data readings LED
 
 /* Sampling freq */
 #define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
@@ -71,7 +74,7 @@ bool DATASEND;             // enable/disable send event to server
 int sample;                // sample index
 int prevsample;               // sample index
 MMA8452Q accel;
-short trigger;                      // 0:notrigger / 1:RSL / 2:ZIC           
+short trigger;                      // 0:notrigger / 1:RSL / 2:ZIC
 long offset_x, offset_y, offset_z; // offset data for normalization
 short old_x, old_y, old_z;         // old acceleration data for normalization
 short ACC_sample[3];              // [0] = x_acc [1] = y_acc [z] = z_acc
@@ -91,7 +94,7 @@ short IQRmax;  // maximun value Interquiarlie
 short IQRmin;  // minimun value Interquiarlie
 short CAVmax;  // maximun value Cumulative aceleration vector
 short CAVmin;  // minimun value Cumulative aceleration vector
-short ACNmax;  // maximun value ?
+long   ACNmax;  // maximun value ?
 short ACNmin;  // minimun value ?
 short ZCmax;   // maximun value Zero crossing
 short ZCmin;   // minimun value Zero crossing
@@ -235,11 +238,10 @@ void loop()
 {
   if (!accSampling(sample)) {
     calcParam(sample);
-trigger = 0;
-    if ( PARAMCALC && !DATASEND && (millis() - startTime) <= TST) {
+    trigger = 0;
+    if (!DATASEND && (millis() - startTime) <= TST) {
       if (CalcRef(psample, ISCALC)) {
         DATASEND = true; //enable seism event
-        PARAMCALC = false;
       } else {
         psample++;// parameter calculator counter
       }
@@ -278,8 +280,9 @@ trigger = 0;
 
   /* Sesim event detect and check every 1 TASD secs after first detection*/
   if (DATASEND) {
-     trigger = 0;
-    if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+    trigger = 0;
+        //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+     if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
       if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
       if (RSL >= RSLref)  trigger = 1;
       digitalWrite(LED_BUILTIN, HIGH);
@@ -487,7 +490,7 @@ int CalcRef(int _sample, bool _iscalc) {
         CAVref = (CAVmax - CAVmin) * Factor_CAV;
         ACNref = (ACNmax - ACNmin) * Factor_ACN;
         ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
-        RSLref = 145;
+        RSLref = 250;
         char line[160];
         snprintf(line, sizeof(line), "Maxmin var %d %d %d %d %d %d %d %d %d ", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
         Serial.print(line);
@@ -699,7 +702,7 @@ int sendPost() {
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
     snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s",
-             ID, now(), (millis() - ntpmicro) % 1000, ACNmax, amaxm, acc_xMax, acc_yMax, acc_zMax,
+             ID, now(), (millis() - ntpmicro) % 1000, ACNmax, trigger, acc_xMax, acc_yMax, acc_zMax,
              ZC, IQR, CAV, latitude, longitude);
     Serial.print("Event ");
     Serial.print(line);
