@@ -3,11 +3,18 @@
 #include <TimeLib.h>
 #include <Wire.h>
 #include <LSM303.h>
-#include <Filters.h>
 #include <ESP8266HTTPClient.h>
 #include <ArduinoSort.h>
 #include <ArduinoJson.h>
+#include <WifiLocation.h>
+/*
 
+  ID 1 = "Pato"
+  ID 2 = "Isi"
+  ID 3 = "Chrysalis"
+  ID 4 = "Zeke I+D"
+  ID 5 = "Zeke Stgo"
+*/
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
 #define ID 4                  // device number identification
@@ -55,6 +62,7 @@ bool DATASEND;             // enable/disable send event to server
 int sample;                // sample index
 int prevsample;
 LSM303 compass;                     // acelerometer objet
+short trigger;                      // 0:notrigger / 1:RSL / 2:ZIC
 long offset_x, offset_y, offset_z; // offset data for normalization
 short old_x, old_y, old_z;         // old acceleration data for normalization
 short ACC_sample[3];              // [0] = x_acc [1] = y_acc [z] = z_acc
@@ -74,7 +82,7 @@ short IQRmax;  // maximun value Interquiarlie
 short IQRmin;  // minimun value Interquiarlie
 short CAVmax;  // maximun value Cumulative aceleration vector
 short CAVmin;  // minimun value Cumulative aceleration vector
-short ACNmax;  // maximun value ?
+long ACNmax;  // maximun value ?
 short ACNmin;  // minimun value ?
 short ZCmax;   // maximun value Zero crossing
 short ZCmin;   // minimun value Zero crossing
@@ -108,11 +116,15 @@ unsigned int localPort = 8888;  // local port to listen for UDP packets
 
 /* geolocation variables */
 //const char* host = "freegeoip.net";        // host where the ip is get it
-const char* host ="ip-api.com";
+const char* host = "ip-api.com";
+const char* googleApiKey = "AIzaSyDrRpRVLNpwu9GsMMB4XyAbE8JrNLG9d98";
+WifiLocation location(googleApiKey);
+location_t loc;
 char latitude[32];                         // latitude value from host
 char longitude[32];                        // longitude value from host
 const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
 const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
+
 void setup()
 {
 
@@ -155,8 +167,15 @@ void setup()
   digitalClockDisplay();
 
   /* geolocation config */
-  getGeo();
 
+  loc = location.getGeoFromWiFi();
+  dtostrf(loc.lat, 7 , 5, latitude); // Leave room for too large numbers!
+  dtostrf(loc.lon, 7 , 5, longitude); // Leave room for too large numbers!
+  Serial.println("Location request data");
+  Serial.println(location.getSurroundingWiFiJson());
+  Serial.println(latitude);
+  Serial.println(longitude);
+  Serial.println("Accuracy: " + String(loc.accuracy));
   /* acclereometer setup , see library for details */
   while (!compass.init()) {
     Serial.println("LSM303DLH not setup, check device !");
@@ -205,7 +224,7 @@ void setup()
   DATASEND = false;
   ISCALC = false;
   EVENT = false;
-    PARAMCALC = true;
+  PARAMCALC = true;
   /* after 3 seconds calculate the offset */
   delay(3000);
   offset(50);  // 50 samples for the offset media
@@ -220,13 +239,13 @@ void setup()
 
 void loop()
 {
-  if (!accSampling(sample)) {
+  if(!accSampling(sample)) {
     calcParam(sample);
-
-    if ( PARAMCALC && !DATASEND && (millis() - startTime) <= TST) {
+    trigger = 0;
+    if (!DATASEND && ((millis() - startTime) <= TST)) {
       if (CalcRef(psample, ISCALC)) {
         DATASEND = true; //enable seism event
-        PARAMCALC = false;
+        //  PARAMCALC = false;
       } else {
         psample++;// parameter calculator counter
       }
@@ -265,7 +284,10 @@ void loop()
 
   /* Sesim event detect and check every 1 TASD secs after first detection*/
   if (DATASEND) {
-    if ( (IQR > IQRref && ZC > ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+    trigger = 0;
+    if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+      if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
+      if (RSL >= RSLref)  trigger = 1;
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
@@ -285,14 +307,14 @@ void loop()
   }
 
   /* parameter calcs every TRNM minutes*/
- /* if (!PARAMCALC && (now() - parameterLap) == (SECS_PER_HOUR * TRNM)) {
-    startTime = millis();
-    parameterLap = now();
-    psample = 0;
-    DATASEND = false;
-    PARAMCALC = true;
-   }
-*/
+  /* if (!PARAMCALC && (now() - parameterLap) == (SECS_PER_HOUR * TRNM)) {
+     startTime = millis();
+     parameterLap = now();
+     psample = 0;
+     DATASEND = false;
+     PARAMCALC = true;
+    }
+  */
   if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
     wifiLap = now();
     /* wait until wifi is connected*/
@@ -470,7 +492,7 @@ int CalcRef(int _sample, bool _iscalc) {
         CAVref = (CAVmax - CAVmin) * Factor_CAV;
         ACNref = (ACNmax - ACNmin) * Factor_ACN;
         ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
-        RSLref = 145;
+        RSLref = 300;
         char line[160];
         snprintf(line, sizeof(line), "Variable %d %d %d %d %d %d %d %d %d ", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
         Serial.print(line);
@@ -497,7 +519,7 @@ int CalcRef(int _sample, bool _iscalc) {
     ACNref = (ACNmax - ACNmin) * Factor_ZC;
     IQRref = 500;  // [mg] integer
     CAVref = 1000; // [mg] integer
-    RSLref = 145;  // percent para medir la ligua
+    RSLref = 300;  // percent para medir la ligua
     ZCref =  22;
     DATASEND = true; //enable seism event
     return 1;
@@ -581,6 +603,23 @@ void offset(int samples) {
   offset_z = offset_z / samples;
 }
 
+void getGeoPost() {
+  WiFiClient client; // Use WiFiClient class to create TCP connections
+  HTTPClient http;
+  if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
+    http.begin("www.googleapis.com/"); //HTTP
+    http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
+    char line[160];
+    snprintf(line, sizeof(line), "%geolocation/v1/geolocate?key=AIzaSyDrRpRVLNpwu9GsMMB4XyAbE8JrNLG9d98");
+    Serial.print("Event ");
+    Serial.print(line);
+    int httpCode = http.POST(line);
+    String payload = http.getString();
+    http.end();
+    Serial.print("   payload  ");
+    Serial.print(payload);    //Print request response payload
+  }
+}
 /* Ip geolotacion */
 void getGeo() {
 
@@ -597,9 +636,9 @@ void getGeo() {
   }
 
   // We now create a URI for the request
-  String url = "/json/";
+  String url;
   // url += streamId;
-  //  url += "?private_key=";
+  url += "?key=AIzaSyDrRpRVLNpwu9GsMMB4XyAbE8JrNLG9d98";
   //  url += privateKey;
   //  url += "&value=";
   //  url += value;
@@ -678,19 +717,19 @@ int sendPost() {
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
     snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s",
-             ID, now(), (millis() - ntpmicro) % 1000, ACNmax, amaxm, acc_xMax, acc_yMax, acc_zMax,
+             ID, now(), (millis() - ntpmicro) % 1000, ACNmax, trigger, acc_xMax, acc_yMax, acc_zMax,
              ZC, IQR, CAV, latitude, longitude);
     Serial.print("Event ");
     Serial.print(line);
     int httpCode = http.POST(line);
     String payload = http.getString();
     http.end();
-    if (payload.equals("1\n")){
+    if (payload.equals("1\n")) {
       return 0;
-    } 
+    }
     else {
-    Serial.print("   payload  ");
-    Serial.print(payload);    //Print request response payload
+      Serial.print("   payload  ");
+      Serial.print(payload);    //Print request response payload
       return 1;
     }
   } else {
