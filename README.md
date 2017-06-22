@@ -1,5 +1,9 @@
 # Seism-Detection ESP8266-Arduino library
-ESP8266 WiFi Connection manager with fallback web configuration portal
+Arduino code for the ESP8266 NodeMcu 1.0 dev board and 3 type of acelerometers.
+- SparkFun Triple Axis Accelerometer Breakout - MMA8452Q https://www.sparkfun.com/products/12756
+- MinIMU-9 v2 Gyro, Accelerometer, and Compass (L3GD20 and LSM303DLHC Carrier) https://www.pololu.com/product/1268
+- SparkFun Triple Axis Accelerometer Breakout - ADXL345 https://www.sparkfun.com/products/9836
+- Módulo GY-291 Acelerómetro ADXL345 Digital de 3 Ejes http://www.maxelectronica.cl/sensores/280-modulo-gy-291-acelerometro-adxl345-digital-de-3-ejes.html
 
 First attempt at a library. Lots more changes and fixes to do. Contributions are welcome.
 
