@@ -7,6 +7,9 @@
 #include <ArduinoSort.h>
 #include <ArduinoJson.h>
 #include <WifiLocation.h>
+#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 /*
 
   ID 1 = "Pato"
@@ -18,7 +21,7 @@
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
 #define ID 4                  // device number identification
-#define TRNM 8UL             // Parameter in between windwos time in hour
+#define TRNM 1UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
 #define TASD 1000               // time after send data in msecs
@@ -44,7 +47,7 @@ unsigned int INTERVALO = (1000 / FrecRPS); // s
 /* time variables */
 time_t tiempo;        // ?
 time_t prevtime;      // time for check every one second
-time_t parameterLap;  // time between reference recalculation
+time_t t_offsetlap;   // time between offset recalculation
 time_t sendTime;      // when an event start
 time_t wifiLap;       // counter time for wifi check
 time_t ntpmicro;      // ntp microseconds
@@ -125,10 +128,10 @@ char longitude[32];                        // longitude value from host
 const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
 const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
 
+WiFiManager wifiManager;
+
 void setup()
 {
-
-
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(WifiPin, OUTPUT);
   pinMode(AccPin, OUTPUT);
@@ -138,10 +141,15 @@ void setup()
   Wire.begin(4, 5);       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
+
+  //first parameter is name of access point, second is the password
+  wifiManager.autoConnect();
+
+
   Serial.println("Prosismic");
   Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, pass);
+ // Serial.println(ssid);
+ // WiFi.begin(ssid, pass);
 
   /* wait until wifi is connected*/
   while (WiFi.status() != WL_CONNECTED) {
@@ -216,7 +224,7 @@ void setup()
   prevsample = 0;
   psample = 0;
   eventsample = 0 ; // samples after first event detected
-  parameterLap = now();
+  t_offsetlap = now();
   sendTime = millis();
   wifiLap = now();
   ntpmicro = millis();
@@ -239,7 +247,7 @@ void setup()
 
 void loop()
 {
-  if(!accSampling(sample)) {
+  if (!accSampling(sample)) {
     calcParam(sample);
     trigger = 0;
     if (!DATASEND && ((millis() - startTime) <= TST)) {
@@ -291,7 +299,7 @@ void loop()
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
-      if (!sendPost()) {
+      if (!sendPost(now())) {
         DATASEND = false;
         EVENT = true;
         digitalWrite(LED_BUILTIN, LOW);
@@ -307,14 +315,12 @@ void loop()
   }
 
   /* parameter calcs every TRNM minutes*/
-  /* if (!PARAMCALC && (now() - parameterLap) == (SECS_PER_HOUR * TRNM)) {
-     startTime = millis();
-     parameterLap = now();
-     psample = 0;
-     DATASEND = false;
-     PARAMCALC = true;
-    }
-  */
+  if ((now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM / 12)) {
+    Serial.print("Offset recalculation");
+    t_offsetlap = now();
+    offset(50);
+  }
+
   if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
     wifiLap = now();
     /* wait until wifi is connected*/
@@ -586,6 +592,9 @@ void restore_parameters() {
 
 void offset(int samples) {
   int j = 0;
+  offset_x = 0;
+  offset_y = 0;
+  offset_z = 0;
   while (j < samples) {
     if (compass.isDataReady()) {
       compass.read();
@@ -708,7 +717,7 @@ void getGeo() {
   client.stop();
 }
 
-int sendPost() {
+int sendPost(time_t _time) {
 
   WiFiClient client; // Use WiFiClient class to create TCP connections
   HTTPClient http;
@@ -717,7 +726,7 @@ int sendPost() {
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
     snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s",
-             ID, now(), (millis() - ntpmicro) % 1000, ACNmax, trigger, acc_xMax, acc_yMax, acc_zMax,
+             ID, _time, (millis() - ntpmicro) % 1000, ACNmax, trigger, acc_xMax, acc_yMax, acc_zMax,
              ZC, IQR, CAV, latitude, longitude);
     Serial.print("Event ");
     Serial.print(line);
