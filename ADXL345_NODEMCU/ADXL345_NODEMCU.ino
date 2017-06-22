@@ -17,7 +17,7 @@
 */
 #define SAMPLES 200           // samples number
 #define N_WIN 6               // Windwos 
-#define ID 5                  // device number identification
+#define ID 2                  // device number identification
 #define TRNM 8UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
@@ -31,22 +31,22 @@
 #define StartWindow 20
 //#define _SSID "katyred"  // network name
 //#define _NETPASS "katynoseanflaites" // network password
-#define _SSID "zekefi-interno"  // network name
-#define _NETPASS "JtXDF5jK79es" // network password    
+//#define _SSID "zekefi-interno"  // network name
+//#define _NETPASS "JtXDF5jK79es" // network password    
 //#define _SSID "zekefi"  // network name
 //#define _NETPASS "0000000000001500000000000015" // network password
-//#define _SSID "VTR-3040015"   // network name+
-//#define _NETPASS "r6msMmgncj6x" // network password
+#define _SSID "VTR-3040015"   // network name+
+#define _NETPASS "r6msMmgncj6x" // network password
 //#define _SSID "Familia"   // network name
 //#define _NETPASS "1234familia" // network password
 
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR  false          // indicate if reference are variables or fixed values
 
-//int WifiPin = D7;     // wifi status LED
-//int AccPin = D7;      // accelerometer data readings LED
-int WifiPin;     // wifi status LED
-int AccPin;      // accelerometer data readings LED
+int WifiPin = D7;     // wifi status LED
+int AccPin = D6;      // accelerometer data readings LED
+//int WifiPin;     // wifi status LED
+//int AccPin;      // accelerometer data readings LED
 
 /* Sampling freq */
 #define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
