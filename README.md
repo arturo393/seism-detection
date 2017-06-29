@@ -88,7 +88,8 @@ Sample data output
 
 
 ```
-
+##Hardware
+EAGLE files can be found on Hardware folder. And a autocad files and BOM can be found here https://circuits.io/circuits/5318012
 ## Releases
 ##### v0.1
 
