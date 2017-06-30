@@ -1,16 +1,10 @@
-#include <ESP8266WiFi.h>
-#include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <Wire.h>
-#include <Filters.h>
-#include <SparkFun_MMA8452Q.h> // Includes the SFE_MMA8452Q library
-#include <ESP8266HTTPClient.h>
+#include <LSM303.h>
+#include <ADXL345.h>
+#include <SparkFun_MMA8452Q.h>
 #include <ArduinoSort.h>
-#include <ArduinoJson.h>
-#include <WifiLocation.h>
-#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
-#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
-#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+
 /*
 
   ID 1 = "Pato"
@@ -19,9 +13,10 @@
   ID 4 = "Zeke I+D"
   ID 5 = "Zeke Stgo"
 */
+
 #define SAMPLES 200           // samples number
-#define N_WIN 2               // Windwos 
-#define ID 1                  // device number identification
+#define N_WIN 2               // Windwos
+#define ID 4                  // device number identification
 #define TRNM 1UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
@@ -33,28 +28,22 @@
 #define Factor_ZC   0.25      // Zero Crossing rate reference factor
 #define Factor_RSL  7
 #define StartWindow 20
-
-#define _SSID "PUCV-PRO"  // network name
-#define _NETPASS "fkralfews6i17" // network password
-//#define _SSID "zekefi-interno"  // network name
-//#define _NETPASS "JtXDF5jK79es" // network password
-//#define _SSID "katyred"  // network name
-//#define _NETPASS "katynoseanflaites" // network password
-//#define _SSID "Familia"   // network name
-//#define _NETPASS "1234familia" // network password
-//#define _SSID "zekefi"  // network name
-//#define _NETPASS "0000000000001500000000000015" // network password
-//#define _SSID "VTR-3040015"   // network name+
-//#define _NETPASS "r6msMmgncj6x" // network password
+#define _SSID "zekefi-interno"  // network name
+#define _NETPASS "JtXDF5jK79es" // network password
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR  false          // indicate if reference are variables or fixed values
 
-int WifiPin = D8;     // wifi status LED
-int AccPin = D7;      // accelerometer data readings LED
+#define LSMACC   1          // LSM303 acceleromter ID
+#define MMAACC   2          // MMA8452Q acceleromter ID
+#define ADXLACC  3          // ADXL345 acceleromter ID
+byte acc_id;                // accelerometer identification
+
+int WifiPin = D5;     // wifi status LED
+int AccPin = D6;      // accelerometer data readings LED
 
 /* Sampling freq */
 #define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
-unsigned int INTERVALO = (1000 / FrecRPS); // ms
+unsigned int INTERVALO = (1000 / FrecRPS); // s
 
 /* time variables */
 time_t tiempo;        // ?
@@ -69,14 +58,17 @@ time_t startTime;
 
 /* accelerometer parameters and variables  */
 int psample;  // sample counter for parameters calculation
-bool ISCALC;  // parameter fixed value enable/disa
-bool PARAMCALC; // parameter calculation event
+bool ISCALC;  // parameter calculation enable/disable
 bool EVENT;             // event detection on/off
+bool PARAMCALC; // parameter calculation event
 int eventsample = 0 ; // samples after first event detected
 bool DATASEND;             // enable/disable send event to server
 int sample;                // sample index
-int prevsample;               // sample index
+int prevsample;
+LSM303 compass;                     // acelerometer objet
 MMA8452Q accel;
+ADXL345 accelerometer;
+acc sca;
 short trigger;                      // 0:notrigger / 1:RSL / 2:ZIC
 long offset_x, offset_y, offset_z; // offset data for normalization
 short old_x, old_y, old_z;         // old acceleration data for normalization
@@ -97,7 +89,7 @@ short IQRmax;  // maximun value Interquiarlie
 short IQRmin;  // minimun value Interquiarlie
 short CAVmax;  // maximun value Cumulative aceleration vector
 short CAVmin;  // minimun value Cumulative aceleration vector
-long   ACNmax;  // maximun value ?
+long ACNmax;  // maximun value ?
 short ACNmin;  // minimun value ?
 short ZCmax;   // maximun value Zero crossing
 short ZCmin;   // minimun value Zero crossing
@@ -116,8 +108,8 @@ long CAVref;    // Cumulative Acceleration vector reference
 short ACNref;    // Cumulative Acceleration vector reference
 
 /* AP settings */
-//char ssid[] = _SSID;  //  your network SSID (name)
-//char pass[] = _NETPASS;       // your network password
+char ssid[] = _SSID;  //  your network SSID (name)
+char pass[] = _NETPASS;       // your network password
 
 /* NTP parameters and NTP Servers: */
 //static const char ntpServerName[] = "us.pool.ntp.org";
@@ -125,21 +117,19 @@ static const char ntpServerName[] = "time.nist.gov";
 //static const char ntpServerName[] = "time-a.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
-const int timeZone = -4;
-WiFiUDP Udp;
+
 unsigned int localPort = 8888;  // local port to listen for UDP packets
+//QuickStats stats; //initialize an instance of this class
 
 /* geolocation variables */
 //const char* host = "freegeoip.net";        // host where the ip is get it
-const char* host = "ip-api.com";      // host where the ip is get it
+const char* host = "ip-api.com";
 const char* googleApiKey = "AIzaSyDrRpRVLNpwu9GsMMB4XyAbE8JrNLG9d98";
-WifiLocation location(googleApiKey);
-location_t loc;
 char latitude[32];                         // latitude value from host
 char longitude[32];                        // longitude value from host
 const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
 const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
-WiFiManager wifiManager;    // for wifi ssid and password configuration
+
 
 void setup()
 {
@@ -148,61 +138,97 @@ void setup()
   pinMode(WifiPin, OUTPUT);
   pinMode(AccPin, OUTPUT);
 
+
   Serial.begin(500000);
   // Wire.begin(int sda, int scl)
-  //  Wire.begin(4, 5);       // join i2c bus (address optional for master)
+  // Wire.begin(4, 5);       // join i2c bus (address optional for master)
+  Wire.begin();       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
 
   //first parameter is name of access point, second is the password
-  wifiManager.autoConnect();
 
-  Serial.println("Prosismic");
-  Serial.print("Connecting to ");
-  //  Serial.println(ssid);
-  //  WiFi.begin(ssid, pass);
-
-  /* wait until wifi is connected*/
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-    digitalWrite(WifiPin, LOW);
-  }
-  digitalWrite(WifiPin, HIGH);
-  Serial.println("");
-
-  Serial.print("IP number assigned by DHCP is ");
-  Serial.println(WiFi.localIP());
-  Serial.println("Starting UDP");
-
-  /* NTP time config */
+  /* NTP time config
   Udp.begin(localPort);
   Serial.print("Local port: ");
   Serial.println(Udp.localPort());
   Serial.println("waiting for sync");
   setSyncProvider(getNtpTime);
-  setSyncInterval(30000);
+  setSyncInterval(300);
   Serial.print("Current time: ");
   digitalClockDisplay();
-  /* geolocation config */
-  /* geolocation config */
-  loc = location.getGeoFromWiFi();
-  dtostrf(loc.lat, 7 , 5, latitude); // Leave room for too large numbers!
-  dtostrf(loc.lon, 7 , 5, longitude); // Leave room for too large numbers!
-  Serial.println("Location request data");
-  Serial.println(location.getSurroundingWiFiJson());
-  Serial.println(latitude);
-  Serial.println(longitude);
-  Serial.println("Accuracy: " + String(loc.accuracy));
+*/
+
+
+
+
+
+
+
+
+
+
   /* acclereometer setup , see library for details */
-  Serial.println("MMA8452Q setup !");
-  while (!accel.init(SCALE_2G, ODR_400)) {
-    Serial.println("MMA8452Q not setup, check device !");
-    delay(5000);
+  acc_id = 0;
+  do {
+    if (!compass.init()) {
+      Serial.println("Could not find a valid LSM303DLH sensor, check wiring or I2C program pins!");
+      delay(500);
+    } else {
+      acc_id = LSMACC;
+    }
+    if (!accel.init(SCALE_2G, ODR_400)) {
+      Serial.println("Could not find a valid MMA8452Q sensor, check wiring or I2C program pins!");
+      delay(500);
+    }  else {
+      acc_id = MMAACC;
+    }
+    if (!accelerometer.begin()) {
+      Serial.println("Could not find a valid ADXL345 sensor, wiring or I2C program pins!");
+      delay(500);
+    } else {
+      acc_id = ADXLACC;
+    }
+  } while (acc_id == 0);
+
+  switch (acc_id) {
+    case LSMACC:
+      {
+        compass.enableDefault();
+        Serial.println("LSM303DLH setup complete!");
+      }
+      break;
+    case MMAACC:
+      {
+        Serial.println("MMA8452Q setup complete!");
+      }
+      break;
+    case ADXLACC:
+      {
+        accelerometer.useInterrupt(ADXL345_INT1);
+        accelerometer.setRange(ADXL345_RANGE_2G);
+        accelerometer.setDataRate(ADXL345_DATARATE_400HZ);
+        Serial.println("ADXL345 setup complete !");
+      }
+      break;
+    default:
+      {
+        Serial.println("MATRIX ERROR");
+      }
+      break;
   }
-  Serial.println("MMA8452Q setup complete !");
-  //  pinMode(DRINTPin, INPUT_PULLUP);
-  //  attachInterrupt(digitalPinToInterrupt(DRINTPin), DRAcc_ISR , RISING);
+
+
+
+
+  /* setup init values */
+  for (int k = 0; k < SAMPLES ; k++) {
+    AccNetnow[k] = 0;
+    acc_x[k] = 0;
+    acc_y[k] = 0;
+    acc_z[k] = 0;
+  }
+
   /* Starting values */
   old_x = 0;
   old_y = 0;
@@ -233,27 +259,40 @@ void setup()
   ISCALC = false;
   EVENT = false;
   PARAMCALC = true;
+
+
+
+
   /* after 3 seconds calculate the offset */
   delay(3000);
   offset(50);  // 50 samples for the offset media
   Serial.println();
+
+
+
   /* start taking samples */
   digitalWrite(AccPin, HIGH);
   digitalWrite(LED_BUILTIN, LOW);
+
 }
+
+
 
 void loop()
 {
   if (!accSampling(sample)) {
     calcParam(sample);
     trigger = 0;
-    if (!DATASEND && (millis() - startTime) <= TST) {
+    if (!DATASEND && ((millis() - startTime) <= TST)) {
       if (CalcRef(psample, ISCALC)) {
         DATASEND = true; //enable seism event
+        //  PARAMCALC = false;
       } else {
         psample++;// parameter calculator counter
       }
     }
+
+
 
     /* count samples for restore event detector */
     if (EVENT) {
@@ -267,6 +306,12 @@ void loop()
     sample++; // window sample counter
   }
 
+  /* restore sampling window */
+  if (sample == SAMPLES)
+    sample = 0;
+
+
+
   /* check if event count complete */
   if (eventsample == SAMPLES / 2) {
     eventsample = 0;
@@ -274,9 +319,9 @@ void loop()
     EVENT = false;
     digitalWrite(LED_BUILTIN, LOW);
   }
-  /* restore sampling window */
-  if (sample == SAMPLES)
-    sample = 0;
+
+
+
 
   /* sync the milliseconds with ntp time */
   if (timeStatus() != timeNotSet) {
@@ -286,17 +331,18 @@ void loop()
     }
   }
 
-  /* Sesim event detect and check every 1 TASD secs after first detection*/
+
+
+  /* Sesim event detect and check every 1 TASD secs after first detection */
   if (DATASEND) {
     trigger = 0;
-    //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
-    if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
+    if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
       if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
       if (RSL >= RSLref)  trigger = 1;
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
-      if (!sendPost()) {
+      if (!sendPost(now())) {
         DATASEND = false;
         EVENT = true;
         digitalWrite(LED_BUILTIN, LOW);
@@ -309,39 +355,62 @@ void loop()
       }
       Serial.println();
     }
+
   }
 
-  /* offset  recalcs every TRNM minutes*/
+
+
+
+  /* offset recalcs every TRNM minutes*/
   if ((now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM / 12)) {
     Serial.print("Offset recalculation");
     t_offsetlap = now();
     offset(50);
   }
 
-  if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
-    wifiLap = now();
-    /* wait until wifi is connected*/
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      Serial.print(".");
-      digitalWrite(WifiPin, LOW);
-    }
-    digitalWrite(WifiPin, HIGH);
-    Serial.println("");
-  }
+
+
 }
 
 /* sampling every INTERVALO and SAMPLES times */
 int accSampling(int _sample) {
-  // if (compass.isDataReady()) {
-  accel.readRaw();
+
   /* read values at sampling rate */
   if (millis() - tiempo >= INTERVALO && _sample < SAMPLES) {
     tiempo = millis();
     digitalClockDisplay();
-    acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
-    acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
-    acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
+    switch (acc_id) {
+      case LSMACC:
+        {
+          compass.read();
+          acc_x[_sample] = 0.5 * (compass.a.x / 16 - offset_x) + 0.5 * old_x;
+          acc_y[_sample] = 0.5 * (compass.a.y / 16 - offset_y) + 0.5 * old_y;
+          acc_z[_sample] = 0.5 * (compass.a.z / 16 - offset_z) + 0.5 * old_z;
+        }
+        break;
+      case MMAACC:
+        {
+          sca = accelerometer.readmg();
+          acc_x[sample] = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
+          acc_y[sample] = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
+          acc_z[sample] = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
+        }
+        break;
+      case ADXLACC:
+        {
+          accel.readRaw(); // mma
+          acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
+          acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
+          acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
+        }
+        break;
+      default:
+        {
+          Serial.println("MATRIX ERROR");
+        }
+        break;
+    }
+
     old_x = acc_x[_sample];
     old_y = acc_y[_sample];
     old_z = acc_z[_sample];
@@ -356,7 +425,6 @@ int accSampling(int _sample) {
     Serial.print(line);
     return 0;
   }
-  //}
   return 1;
 }
 
@@ -382,6 +450,9 @@ time_t calcParam(int _sample) {
   short acc_xabs;
   short acc_yabs;
   short acc_zabs;
+
+  short xc;
+  short xp;
 
 
   startcalc = millis();
@@ -427,31 +498,44 @@ time_t calcParam(int _sample) {
     if (i >= SAMPLES - _smpl) {
       sumshort += AccNetnow[i - 1];
     }
+    xc = getSign(acc_x[i]);
+    xp = getSign(acc_y[i-1]);
 
-    /* ZC sum */
-    xcurrent = (acc_x[i] > 0);
-    xprevious = (acc_x[i - 1] > 0);
-    ycurrent = (acc_y[i] > 0);
-    yprevious = (acc_y[i - 1] > 0);
-    zcurrent = (acc_z[i] > 0);
-    zprevious = (acc_z[i - 1] > 0);
 
-    // if the sign is different
-    if (xcurrent != xprevious)
-    {
-      // add one to the zero crossing rate
+
+    if ((acc_x[i] * acc_x[i - 1]) < 0)
       xzcr = xzcr + 1;
-    }
-    if (ycurrent != yprevious)
-    {
+    if ((acc_y[i] * acc_y[i - 1]) < 0)
+      yzcr = yzcr + 1;
+    if ((acc_z[i] * acc_z[i - 1]) < 0)
+      zzcr = zzcr + 1;
+
+
+    /* ZC sum
+      xcurrent = (acc_x[i] > 0);
+      xprevious = (acc_x[i - 1] > 0);
+      ycurrent = (acc_y[i] > 0);
+      yprevious = (acc_y[i - 1] > 0);
+      zcurrent = (acc_z[i] > 0);
+      zprevious = (acc_z[i - 1] > 0);
+
+      // if the sign is different
+      if (xcurrent != xprevious)
+      {
+      // add one to the zero crossing rate
+      xzcr =  + 1;
+      }
+      if (ycurrent != yprevious)
+      {
       // add one to the zero crossing rate
       yzcr = yzcr + 1;
-    }
-    if (zcurrent != zprevious)
-    {
+      }
+      if (zcurrent != zprevious)
+      {
       // add one to the zero crossing rate
       zzcr = zzcr + 1;
-    }
+      }
+    */
   }
   cavlong = (sumlong / SAMPLES) ;
   cavshort = (sumshort / _smpl) ;
@@ -462,11 +546,19 @@ time_t calcParam(int _sample) {
   IQR = (temp[SAMPLES / 4 * 3 - 1] - temp[SAMPLES / 4 - 1]);
 
   char line[160];
-  snprintf(line, sizeof(line), "%lu %d %d %d %d %lu %d %d %d %d ", (millis() - startcalc), acc_xMax, acc_yMax , acc_zMax, ACNmax , trigger, ZC, IQR, CAV, RSL);
-  Serial.print(line);
-  snprintf(line, sizeof(line), " %d %d %d %d ", ZCref, IQRref, CAVref, RSLref);
+  snprintf(line, sizeof(line), "%lu %d %d %d %d %lu %d %d %d %d ", (millis() - startcalc), acc_xMax, acc_yMax , acc_zMax, ACNmax , amaxm, ZC, IQR, CAV, RSL);
   Serial.print(line);
   return (millis() - startcalc);
+}
+/* get sign of number */
+byte getSign(short data)
+{
+  if(data>0)      /* positif data */
+    return (1);
+  if(data<0)            /* negatif data */
+    return (0);
+   else
+   return(2);  /*zero data */
 }
 
 int CalcRef(int _sample, bool _iscalc) {
@@ -497,9 +589,9 @@ int CalcRef(int _sample, bool _iscalc) {
         CAVref = (CAVmax - CAVmin) * Factor_CAV;
         ACNref = (ACNmax - ACNmin) * Factor_ACN;
         ZCref =  float(ZCmax) - float(ZCmin * Factor_ZC);
-        RSLref = 250;
+        RSLref = 300;
         char line[160];
-        snprintf(line, sizeof(line), "Maxmin var %d %d %d %d %d %d %d %d %d ", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
+        snprintf(line, sizeof(line), "Variable %d %d %d %d %d %d %d %d %d ", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
         Serial.print(line);
 
       } else {
@@ -510,7 +602,7 @@ int CalcRef(int _sample, bool _iscalc) {
         CAVmax = CAV;
         CAVmin = CAV;
         char line[160];
-        snprintf(line, sizeof(line), "Maxmin fijo %d %d %d %d %d %d %d %d %d", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
+        snprintf(line, sizeof(line), "Fijo %d %d %d %d %d %d %d %d %d", ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, ZCref, IQRref, CAVref);
         Serial.print(line);
       }
 
@@ -524,11 +616,8 @@ int CalcRef(int _sample, bool _iscalc) {
     ACNref = (ACNmax - ACNmin) * Factor_ZC;
     IQRref = 500;  // [mg] integer
     CAVref = 1000; // [mg] integer
-    RSLref = 250;  // percent para medir la ligua
+    RSLref = 300;  // percent para medir la ligua
     ZCref =  22;
-    char line[160];
-    snprintf(line, sizeof(line), "Param fijo %d %d %d %d ", ZCref, IQRref, CAVref, RSLref);
-    Serial.print(line);
     DATASEND = true; //enable seism event
     return 1;
 
@@ -591,148 +680,70 @@ void restore_parameters() {
   ZCmin = 0;
 }
 
-
 void offset(int samples) {
   int j = 0;
   offset_x = 0;
   offset_y = 0;
   offset_z = 0;
   while (j < samples) {
-    accel.readRaw();
     if (millis() - tiempo >= INTERVALO) {
       tiempo = millis();
-      offset_x += accel.x;
-      offset_y += accel.y;
-      offset_z += accel.z;
+      switch (acc_id) {
+        case LSMACC:
+          {
+            compass.read();
+            offset_x += compass.a.x / 16;
+            offset_y += compass.a.y / 16;
+            offset_z += compass.a.z / 16;
+          }
+          break;
+        case MMAACC:
+          {
+            sca = accelerometer.readmg();
+            offset_x += sca.XAxis;
+            offset_y += sca.YAxis;
+            offset_z += sca.ZAxis;
+          }
+          break;
+        case ADXLACC:
+          {
+            accel.readRaw();
+            offset_x += accel.x;
+            offset_y += accel.y;
+            offset_z += accel.z;
+          }
+          break;
+        default:
+          {
+            Serial.println("MATRIX ERROR");
+          }
+          break;
+      }
       j++;
     }
   }
+
   offset_x = offset_x / samples;
   offset_y = offset_y / samples;
   offset_z = offset_z / samples;
   char line[30];
   snprintf(line, sizeof(line), "Xoffset %l Yoffset %l zoffset %l", offset_x, offset_y, offset_z);
   Serial.print(line);
+
 }
 
-/* Ip geolotacion */
-void getGeo() {
 
-  Serial.print("connecting to ");
-  Serial.println(host);
+int sendPost(time_t _time) {
 
-  // Use WiFiClient class to create TCP connections
-  WiFiClient client;
-  const int httpPort = 80;
-
-  if (!client.connect(host, httpPort)) {
-    Serial.println("connection failed");
-    return;
-  }
-
-  // We now create a URI for the request
-  String url = "/json/";
-  // url += streamId;
-  //  url += "?private_key=";
-  //  url += privateKey;
-  //  url += "&value=";
-  //  url += value;
-
-  Serial.print("Requesting URL: ");
-  Serial.println(url);
-  Serial.print(String("GET ") + url + " HTTP/1.1\r\n" +
-               "Host: " + host + "\r\n" +
-               "Connection: close\r\n\r\n");
-
-  // This will send the request to the server
-  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-               "Host: " + host + "\r\n" +
-               "Connection: close\r\n\r\n");
-  unsigned long timeout = millis();
-
-  while (client.available() == 0) {
-    if (millis() - timeout > 5000) {
-      Serial.println(">>> Client Timeout !");
-      client.stop();
-      return;
-    }
-  }
-
-  // Skip HTTP headers so that we are at the beginning of the response's body
-  // HTTP headers end with an empty line
-  char endOfHeaders[] = "\r\n\r\n";
-
-  client.setTimeout(HTTP_TIMEOUT);
-  bool ok = client.find(endOfHeaders);
-
-  if (!ok) {
-    Serial.println("No response or invalid response!");
-  }
-
-  // Compute optimal size of the JSON buffer according to what we need to parse.
-  // This is only required if you use StaticJsonBuffer.
-  const size_t BUFFER_SIZE =
-    JSON_OBJECT_SIZE(8)    // the root object has 8 elements
-    + JSON_OBJECT_SIZE(5)  // the "address" object has 5 elements
-    + JSON_OBJECT_SIZE(2)  // the "geo" object has 2 elements
-    + JSON_OBJECT_SIZE(3)  // the "company" object has 3 elements
-    + MAX_CONTENT_SIZE;    // additional space for strings
-
-  // Allocate a temporary memory pool
-  DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
-
-  JsonObject& root = jsonBuffer.parseObject(client);
-
-  if (!root.success()) {
-    Serial.println("JSON parsing failed!");
-    return;
-  }
-
-  // Here were copy the strings we're interested in
-  strcpy(latitude, root["lat"]);
-  strcpy(longitude, root["lon"]);
-  // It's not mandatory to make a copy, you could just use the pointers
-  // Since, they are pointing inside the "content" buffer, so you need to make
-  // sure it's still in memory when you read the string
-
-  Serial.print("Longitude = ");
-  Serial.println(longitude);
-  Serial.print("Latitude = ");
-  Serial.println(latitude);
-  Serial.println("Disconnect");
-  client.stop();
-}
-
-int sendPost() {
-
-  WiFiClient client; // Use WiFiClient class to create TCP connections
-  HTTPClient http;
-  if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
-    http.begin("http://prosismic.zeke.cl/registrarEvento"); //HTTP
-    http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
     snprintf(line, sizeof(line), "%d;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s",
-             ID, now(), (millis() - ntpmicro) % 1000, ACNmax, trigger, acc_xMax, acc_yMax, acc_zMax,
+             ID, _time, (millis() - ntpmicro) % 1000, ACNmax, trigger, acc_xMax, acc_yMax, acc_zMax,
              ZC, IQR, CAV, latitude, longitude);
-    Serial.print("Event ");
-    Serial.print(line);
-    int httpCode = http.POST(line);
-    String payload = http.getString();
-    http.end();
-    if (payload.equals("1\n")) {
-      return 0;
-    }
-    else {
-      Serial.print("   payload  ");
-      Serial.print(payload);    //Print request response payload
-      return 1;
-    }
-  } else {
-    digitalWrite(WifiPin, LOW);
-    Serial.println("Error in WiFi connection");
-    return 1;
-  }
+
+             Serial.println(line);
+return 0;
 }
+
 
 void print_all_raw(int _sample) {
   digitalClockDisplay();
@@ -831,11 +842,11 @@ void print_acc_values_raw(int _sample) {
 
 void print_acc_raw() {
 
-  Serial.print(accel.x);
+  Serial.print(compass.a.x);
   Serial.print("   ");
-  Serial.print(accel.y);
+  Serial.print(compass.a.y);
   Serial.print("   ");
-  Serial.print(accel.z);
+  Serial.print(compass.a.z);
   Serial.print("   ");
 }
 
@@ -884,7 +895,7 @@ void printmillisntp(time_t _millis) {
 }
 
 
-/*-------- NTP code ----------*/
+/*-------- NTP code ----------
 
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
 byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
@@ -943,3 +954,4 @@ void sendNTPpacket(IPAddress & address)
   Udp.write(packetBuffer, NTP_PACKET_SIZE);
   Udp.endPacket();
 }
+*/

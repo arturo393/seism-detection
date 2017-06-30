@@ -148,8 +148,8 @@ void setup()
 
   Serial.println("Prosismic");
   Serial.print("Connecting to ");
- // Serial.println(ssid);
- // WiFi.begin(ssid, pass);
+  // Serial.println(ssid);
+  // WiFi.begin(ssid, pass);
 
   /* wait until wifi is connected*/
   while (WiFi.status() != WL_CONNECTED) {
@@ -314,7 +314,7 @@ void loop()
     }
   }
 
-  /* parameter calcs every TRNM minutes*/
+  /* offset recalcs every TRNM minutes*/
   if ((now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM / 12)) {
     Serial.print("Offset recalculation");
     t_offsetlap = now();
@@ -610,6 +610,10 @@ void offset(int samples) {
   offset_x = offset_x / samples;
   offset_y = offset_y / samples;
   offset_z = offset_z / samples;
+  char line[30];
+  snprintf(line, sizeof(line), "Xoffset %l Yoffset %l zoffset %l",offset_x,offset_y,offset_z);
+  Serial.print(line);
+
 }
 
 void getGeoPost() {

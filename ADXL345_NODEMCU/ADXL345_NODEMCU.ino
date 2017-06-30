@@ -8,6 +8,10 @@
 #include <ArduinoSort.h>
 #include <ArduinoJson.h>
 #include <WifiLocation.h>
+#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+
 /*
   ID 1 = "Pato"
   ID 2 = "Isi"
@@ -18,7 +22,7 @@
 #define SAMPLES 200           // samples number
 #define N_WIN 6               // Windwos 
 #define ID 2                  // device number identification
-#define TRNM 8UL             // Parameter in between windwos time in hour
+#define TRNM 1UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
 #define TASD 1000               // time after send data in msecs
@@ -32,11 +36,11 @@
 //#define _SSID "katyred"  // network name
 //#define _NETPASS "katynoseanflaites" // network password
 //#define _SSID "zekefi-interno"  // network name
-//#define _NETPASS "JtXDF5jK79es" // network password    
+//#define _NETPASS "JtXDF5jK79es" // network password
 //#define _SSID "zekefi"  // network name
 //#define _NETPASS "0000000000001500000000000015" // network password
-#define _SSID "VTR-3040015"   // network name+
-#define _NETPASS "r6msMmgncj6x" // network password
+//#define _SSID "VTR-3040015"   // network name+
+//#define _NETPASS "r6msMmgncj6x" // network password
 //#define _SSID "Familia"   // network name
 //#define _NETPASS "1234familia" // network password
 
@@ -55,7 +59,7 @@ unsigned int INTERVALO = (1000 / FrecRPS); // s
 /* time variables */
 time_t tiempo;        // ?
 time_t prevtime;      // time for check every one second
-time_t parameterLap;  // time between reference recalculation
+time_t t_offsetlap;   // time between offset recalculation
 time_t sendTime;      // when an event start
 time_t wifiLap;       // counter time for wifi check
 time_t ntpmicro;      // ntp microseconds
@@ -114,8 +118,8 @@ long CAVref;    // Cumulative Acceleration vector reference
 short ACNref;    // Cumulative Acceleration vector reference
 
 /* AP settings */
-char ssid[] = _SSID;  //  your network SSID (name)
-char pass[] = _NETPASS;       // your network password
+//char ssid[] = _SSID;  //  your network SSID (name)
+//char pass[] = _NETPASS;       // your network password
 
 /* NTP parameters and NTP Servers: */
 //static const char ntpServerName[] = "us.pool.ntp.org";
@@ -125,7 +129,6 @@ static const char ntpServerName[] = "time.nist.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
-//QuickStats stats; //initialize an instance of this class
 
 /* geolocation variables */
 //const char* host = "freegeoip.net";        // host where the ip is get it
@@ -137,6 +140,7 @@ const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
 const char* googleApiKey = "AIzaSyDrRpRVLNpwu9GsMMB4XyAbE8JrNLG9d98";
 WifiLocation location(googleApiKey);
 location_t loc;
+WiFiManager wifiManager;    // for wifi ssid and password configuration
 
 void setup()
 {
@@ -152,10 +156,14 @@ void setup()
   Wire.begin(4, 5);       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
+
+  //first parameter is name of access point, second is the password
+  wifiManager.autoConnect();
+
   Serial.println("Prosismic");
   Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, pass);
+  //  Serial.println(ssid);
+  //  WiFi.begin(ssid, pass);
 
   /* wait until wifi is connected*/
   while (WiFi.status() != WL_CONNECTED) {
@@ -234,7 +242,7 @@ void setup()
   prevsample = 0;
   psample = 0;
   eventsample = 0 ; // samples after first event detected
-  parameterLap = now();
+  t_offsetlap = now();
   sendTime = millis();
   wifiLap = now();
   ntpmicro = millis();
@@ -298,7 +306,7 @@ void loop()
   /* Sesim event detect and check every 1 TASD secs after first detection*/
   if (DATASEND) {
     //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
-     if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
+    if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
       if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
       if (RSL >= RSLref)  trigger = 1;
       digitalWrite(LED_BUILTIN, HIGH);
@@ -319,15 +327,13 @@ void loop()
     }
   }
 
-  /* parameter calcs every TRNM minutes*/
-  /* if (!PARAMCALC && (now() - parameterLap) == (SECS_PER_HOUR * TRNM)) {
-     startTime = millis();
-     parameterLap = now();
-     psample = 0;
-     DATASEND = false;
-     PARAMCALC = true;
-    }
-  */
+  /* offset  recalcs every TRNM minutes*/
+  if ((now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM / 12)) {
+    Serial.print("Offset recalculation");
+    t_offsetlap = now();
+    offset(50);
+  }
+  
   if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
     wifiLap = now();
     /* wait until wifi is connected*/
@@ -606,8 +612,10 @@ void restore_parameters() {
 
 void offset(int samples) {
   int j = 0;
+  offset_x = 0;
+  offset_y = 0;
+  offset_z = 0;
   while (j < samples) {
-    //    if (compass.isDataReady()) {
     sca = accelerometer.readmg();
     if (millis() - tiempo >= INTERVALO) {
       tiempo = millis();
@@ -616,11 +624,13 @@ void offset(int samples) {
       offset_z += sca.ZAxis;
       j++;
     }
-    //   }
   }
   offset_x = offset_x / samples;
   offset_y = offset_y / samples;
   offset_z = offset_z / samples;
+  char line[30];
+  snprintf(line, sizeof(line), "Xoffset %l Yoffset %l zoffset %l", offset_x, offset_y, offset_z);
+  Serial.print(line);  
 }
 
 /* Ip geolotacion */
