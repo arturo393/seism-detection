@@ -202,7 +202,7 @@ void setup()
    Serial.println("Setting NTP Time");
    rtc.begin(&UDPClient, "north-america.pool.ntp.org");
    Serial.print("Current Time ");
-   Serial.print(rtc.now());
+   digitalClockDisplay();
 
   /* setup init values */
   for (int k = 0; k < SAMPLES ; k++) {
@@ -848,7 +848,7 @@ void print_mag(int _sample) {
 
 void digitalClockDisplay()
 {
-  Serial.print(rtc.ISODateUTCString(currentTime));
+  Serial.print(rtc.ISODateUTCString(rtc.now()));
   printmillisntp(millis());
   Serial.print("   ");
 }
