@@ -198,11 +198,19 @@ void setup()
       }
       break;
   }
-
+ /*
    Serial.println("Setting NTP Time");
    rtc.begin(&UDPClient, "north-america.pool.ntp.org");
    Serial.print("Current Time ");
    digitalClockDisplay();
+*/
+Serial.println("Setting Time and timers");
+Serial.println(Time.now()); // 1400647897
+Serial.println(Time.timeStr()); // Wed May 21 01:08:47 2014
+t_offsetlap = Time.now();
+sendTime = millis();
+ntpmicro = millis();
+startTime = millis();
 
   /* setup init values */
   for (int k = 0; k < SAMPLES ; k++) {
@@ -233,10 +241,7 @@ void setup()
   prevsample = 0;
   psample = 0;
   eventsample = 0 ; // samples after first event detected
-  t_offsetlap = rtc.now();
-  sendTime = millis();
-  ntpmicro = millis();
-  startTime = millis();
+
   DATASEND = false;
   ISCALC = false;
   EVENT = false;
@@ -307,8 +312,8 @@ void loop()
 
   /* sync the milliseconds with ntp time */
 
-    if (rtc.now() != prevtime) { //update the display only if time has changed
-      prevtime = rtc.now();
+    if (Time.now() != prevtime) { //update the display only if time has changed
+      prevtime = Time.now();
       ntpmicro = millis();
     }
 
@@ -324,7 +329,7 @@ void loop()
       digitalWrite(LED_BUILTIN, HIGH);
       digitalClockDisplay();
       sendTime = millis();
-      if (!sendPost(rtc.now())) {
+      if (!sendPost(Time.now())) {
         DATASEND = false;
         EVENT = true;
         digitalWrite(LED_BUILTIN, LOW);
@@ -344,9 +349,9 @@ void loop()
 
 
   /* offset recalcs every TRNM minutes*/
-  if ((rtc.now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM / 12)) {
+  if ((Time.now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM / 12)) {
     Serial.print("Offset recalculation");
-    t_offsetlap = rtc.now();
+    t_offsetlap = Time.now();
     offset(50);
   }
 
@@ -372,18 +377,19 @@ int accSampling(int _sample) {
         break;
       case MMAACC:
         {
-          sca = accelerometer.readmg();
-          acc_x[sample] = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
-          acc_y[sample] = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
-          acc_z[sample] = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
-        }
-        break;
-      case ADXLACC:
-        {
           accel.readRaw(); // mma
           acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
           acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
           acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
+
+        }
+        break;
+      case ADXLACC:
+        {
+          sca = accelerometer.readmg();
+          acc_x[sample] = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
+          acc_y[sample] = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
+          acc_z[sample] = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
         }
         break;
       default:
@@ -670,6 +676,7 @@ void offset(int samples) {
   while (j < samples) {
     if (millis() - tiempo >= INTERVALO) {
       tiempo = millis();
+
       switch (acc_id) {
         case LSMACC:
           {
@@ -681,18 +688,19 @@ void offset(int samples) {
           break;
         case MMAACC:
           {
-            sca = accelerometer.readmg();
-            offset_x += sca.XAxis;
-            offset_y += sca.YAxis;
-            offset_z += sca.ZAxis;
-          }
-          break;
-        case ADXLACC:
-          {
             accel.readRaw();
             offset_x += accel.x;
             offset_y += accel.y;
             offset_z += accel.z;
+
+          }
+          break;
+        case ADXLACC:
+          {
+            sca = accelerometer.readmg();
+            offset_x += sca.XAxis;
+            offset_y += sca.YAxis;
+            offset_z += sca.ZAxis;
           }
           break;
         default:
@@ -702,6 +710,7 @@ void offset(int samples) {
           break;
       }
       j++;
+
     }
   }
 
@@ -709,7 +718,7 @@ void offset(int samples) {
   offset_y = offset_y / samples;
   offset_z = offset_z / samples;
   char line[30];
-  snprintf(line, sizeof(line), "Xoffset %l Yoffset %l zoffset %l", offset_x, offset_y, offset_z);
+  snprintf(line, sizeof(line), "Xoffset %d Yoffset %d zoffset %d", offset_x, offset_y, offset_z);
   Serial.print(line);
 
 }
@@ -848,7 +857,8 @@ void print_mag(int _sample) {
 
 void digitalClockDisplay()
 {
-  Serial.print(rtc.ISODateUTCString(rtc.now()));
+  Serial.println(Time.timeStr()); // Wed May 21 01:08:47 201
+  Serial.pint(".")
   printmillisntp(millis());
   Serial.print("   ");
 }
