@@ -23,7 +23,7 @@
 
 #define SAMPLES 200           // samples number
 #define N_WIN 2               // Windwos 
-#define ID 4                  // device number identification
+#define ID 5                  // device number identification
 #define TRNM 1UL             // Parameter in between windwos time in hour
 #define TST 10000UL                // Start parameter windwos in secs
 #define TRNS 40               // Sample windows time in millisecs
@@ -62,7 +62,7 @@ time_t ntpmicro;      // ntp microseconds
 time_t eventAccion;   // time after event is on
 time_t amaxm;         // millsecond of the max acceleration
 time_t startTime;
-
+time_t t_online;      //
 /* accelerometer parameters and variables  */
 int psample;  // sample counter for parameters calculation
 bool ISCALC;  // parameter calculation enable/disable
@@ -75,7 +75,7 @@ int prevsample;
 LSM303 compass;                     // acelerometer objet
 MMA8452Q accel;
 ADXL345 accelerometer;
-Vector sca;
+acc sca;
 short trigger;                      // 0:notrigger / 1:RSL / 2:ZIC
 long offset_x, offset_y, offset_z; // offset data for normalization
 short old_x, old_y, old_z;         // old acceleration data for normalization
@@ -120,7 +120,7 @@ char pass[] = _NETPASS;       // your network password
 
 /* NTP parameters and NTP Servers: */
 //static const char ntpServerName[] = "us.pool.ntp.org";
-static const char ntpServerName[] = "time.nist.gov";
+char ntpServerName[40];
 //static const char ntpServerName[] = "time-a.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
 //static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
@@ -182,11 +182,12 @@ void setup()
   Serial.print("Local port: ");
   Serial.println(Udp.localPort());
   Serial.println("waiting for sync");
+  time_t t_ntp = 0;
+
   setSyncProvider(getNtpTime);
-  setSyncInterval(300);
+  setSyncInterval(SECS_PER_HOUR * 1);
   Serial.print("Current time: ");
   digitalClockDisplay();
-
 
 
 
@@ -328,9 +329,7 @@ void loop()
         psample++;// parameter calculator counter
       }
     }
-
-
-
+    
     /* count samples for restore event detector */
     if (EVENT) {
       Serial.print("  Pause even for ");
@@ -348,7 +347,9 @@ void loop()
     sample = 0;
 
 
-
+  
+  
+  
   /* check if event count complete */
   if (eventsample == SAMPLES / 2) {
     eventsample = 0;
@@ -398,12 +399,18 @@ void loop()
 
 
   /* offset recalcs every TRNM minutes*/
-  if ((now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM / 12)) {
+  if ((now() - t_offsetlap) >= (SECS_PER_HOUR * TRNM)) {
     Serial.print("Offset recalculation");
     t_offsetlap = now();
     offset(50);
   }
 
+  /* offset recalcs every TRNM minutes*/
+  if ((now() - t_online) >= (SECS_PER_HOUR * TRNM/12)) {
+    Serial.print("Sensor Report Status");
+    t_online = now();
+    
+  }
 
 
   /* Check wifi connection */
@@ -439,18 +446,20 @@ int accSampling(int _sample) {
         break;
       case MMAACC:
         {
-          sca = accelerometer.readmg();
-          acc_x[sample] = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
-          acc_y[sample] = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
-          acc_z[sample] = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
-        }
-        break;
-      case ADXLACC:
-        {
           accel.readRaw(); // mma
           acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
           acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
           acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
+
+        }
+        break;
+      case ADXLACC:
+        {        
+          sca = accelerometer.readmg();
+          acc_x[sample] = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
+          acc_y[sample] = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
+          acc_z[sample] = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
+
         }
         break;
       default:
@@ -470,7 +479,7 @@ int accSampling(int _sample) {
 
     AccNetnow[_sample] = sqrt(aax + aay + aaz) * 100.0; // net aceleration with 2 decimals integer
     char line[30];
-    snprintf(line, sizeof(line), "%d %d %d %d %d  ", sample, acc_x[_sample], acc_y[_sample], acc_z[_sample], AccNetnow[_sample] );
+    snprintf(line, sizeof(line), "%3d %2d %2d %2d %4d  ", sample, acc_x[_sample], acc_y[_sample], acc_z[_sample], AccNetnow[_sample] );
     Serial.print(line);
     return 0;
   }
@@ -547,46 +556,90 @@ time_t calcParam(int _sample) {
     if (i >= SAMPLES - _smpl) {
       sumshort += AccNetnow[i - 1];
     }
+    /*
     xc = getSign(acc_x[i]);
-    xp = getSign(acc_y[i-1]);
+    xp = getSign(acc_y[i - 1]);
 
-    if(xc!=xp){
+    if (xc != xp) {
       xzcr = xzcr + 1;
     }
-    
+
     if ((acc_x[i] * acc_x[i - 1]) < 0)
       xzcr = xzcr + 1;
     if ((acc_y[i] * acc_y[i - 1]) < 0)
       yzcr = yzcr + 1;
     if ((acc_z[i] * acc_z[i - 1]) < 0)
       zzcr = zzcr + 1;
+*/
+
+    /* ZC sum */
+
+        /* ZC sum */
+    xcurrent = (acc_x[i] > 0);
+    xprevious = (acc_x[i - 1] > 0);
+    ycurrent = (acc_y[i] > 0);
+    yprevious = (acc_y[i - 1] > 0);
+    zcurrent = (acc_z[i] > 0);
+    zprevious = (acc_z[i - 1] > 0);
+    /*
+      bool xstate;
+      bool ystate;
+      bool zstate;
+
+      if(acc_x[i] > 0 )
+      xcurrent = true;
+      if(acc_x[i-1] < 0)
+      xprevious = false;
+      
+      if(acc_x[i] < 0 )
+      xcurrent = false;
+      if(acc_x[i-1] > 0)
+      xprevious = true;
+      
+
+      if(acc_y[i] > 0 )
+      ycurrent = true;
+      if(acc_y[i-1] < 0)
+      yprevious = false;
+
+      if(acc_y[i] < 0 )
+      ycurrent = false;
+      if(acc_y[i-1] > 0)
+      yprevious = true;
 
 
-    /* ZC sum
-      xcurrent = (acc_x[i] > 0);
-      xprevious = (acc_x[i - 1] > 0);
-      ycurrent = (acc_y[i] > 0);
-      yprevious = (acc_y[i - 1] > 0);
-      zcurrent = (acc_z[i] > 0);
-      zprevious = (acc_z[i - 1] > 0);
 
+      if(acc_z[i] > 0 )
+      zcurrent = true;
+      if(acc_z[i-1] < 0)
+      zprevious = false;
+
+      if(acc_z[i] < 0 )
+      zcurrent = false;
+      if(acc_z[i-1] > 0)
+      zprevious = true;
+    
+*/
       // if the sign is different
-      if (xcurrent != xprevious)
+      if ((xcurrent != xprevious) )
       {
       // add one to the zero crossing rate
       xzcr =  + 1;
+     
       }
-      if (ycurrent != yprevious)
+      if ((ycurrent != yprevious) )
       {
       // add one to the zero crossing rate
       yzcr = yzcr + 1;
+    
       }
-      if (zcurrent != zprevious)
+      if ((zcurrent != zprevious))
       {
       // add one to the zero crossing rate
       zzcr = zzcr + 1;
+   
       }
-    */
+    
   }
   cavlong = (sumlong / SAMPLES) ;
   cavshort = (sumshort / _smpl) ;
@@ -597,19 +650,19 @@ time_t calcParam(int _sample) {
   IQR = (temp[SAMPLES / 4 * 3 - 1] - temp[SAMPLES / 4 - 1]);
 
   char line[160];
-  snprintf(line, sizeof(line), "%lu %d %d %d %d %lu %d %d %d %d ", (millis() - startcalc), acc_xMax, acc_yMax , acc_zMax, ACNmax , amaxm, ZC, IQR, CAV, RSL);
+  snprintf(line, sizeof(line), "%1lu[ms] %2d %2d %2d %4d %3d %4d %4d %4d ", (millis() - startcalc), acc_xMax, acc_yMax , acc_zMax, ACNmax, ZC, IQR, CAV, RSL);
   Serial.print(line);
   return (millis() - startcalc);
 }
 /* get sign of number */
 byte getSign(short data)
 {
-  if(data>0)      /* positif data */
+  if (data > 0)   /* positif data */
     return (1);
-  if(data<0)            /* negatif data */
+  if (data < 0)         /* negatif data */
     return (0);
-   else
-   return(2);  /*zero data */
+  else
+    return (2); /*zero data */
 }
 
 int CalcRef(int _sample, bool _iscalc) {
@@ -750,18 +803,18 @@ void offset(int samples) {
           break;
         case MMAACC:
           {
-            sca = accelerometer.readmg();
-            offset_x += sca.XAxis;
-            offset_y += sca.YAxis;
-            offset_z += sca.ZAxis;
-          }
-          break;
-        case ADXLACC:
-          {
             accel.readRaw();
             offset_x += accel.x;
             offset_y += accel.y;
             offset_z += accel.z;
+          }
+          break;
+        case ADXLACC:
+          {
+            sca = accelerometer.readmg();
+            offset_x += sca.XAxis;
+            offset_y += sca.YAxis;
+            offset_z += sca.ZAxis;
           }
           break;
         default:
@@ -778,7 +831,7 @@ void offset(int samples) {
   offset_y = offset_y / samples;
   offset_z = offset_z / samples;
   char line[30];
-  snprintf(line, sizeof(line), "Xoffset %l Yoffset %l zoffset %l", offset_x, offset_y, offset_z);
+  snprintf(line, sizeof(line), "Xoffset %2d Yoffset %2d zoffset %2d", offset_x, offset_y, offset_z);
   Serial.print(line);
 
 }
@@ -1064,8 +1117,9 @@ void printDigits(int digits)
   Serial.print(digits);
 }
 void printmillisntp(time_t _millis) {
-  Serial.print((_millis - ntpmicro) % 1000);
-  Serial.print("   ");
+  char line[10];
+  snprintf(line, sizeof(line), "%3d\t", (_millis - ntpmicro) % 1000);
+  Serial.print(line);
 }
 
 
@@ -1077,31 +1131,73 @@ byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
 time_t getNtpTime()
 {
   IPAddress ntpServerIP; // NTP server's ip address
-
-  while (Udp.parsePacket() > 0) ; // discard any previously received packets
-  Serial.println("Transmit NTP Request");
-  // get a random server from the pool
-  WiFi.hostByName(ntpServerName, ntpServerIP);
-  Serial.print(ntpServerName);
-  Serial.print(": ");
-  Serial.println(ntpServerIP);
-  sendNTPpacket(ntpServerIP);
-  uint32_t beginWait = millis();
-  while (millis() - beginWait < 1500) {
-    int size = Udp.parsePacket();
-    if (size >= NTP_PACKET_SIZE) {
-      Serial.println("Receive NTP Response");
-      Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
-      unsigned long secsSince1900;
-      // convert four bytes starting at location 40 to a long integer
-      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
-      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
-      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
-      secsSince1900 |= (unsigned long)packetBuffer[43];
-      //return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
-      return secsSince1900 - 2208988800UL;
+  byte server = 1;
+  do {
+    switch (server) {
+      case 1:
+        {
+          strcpy(ntpServerName, "us.pool.ntp.org");
+          Serial.println("us.pool.ntp.org");
+          server = 2;
+        }
+        break;
+      case 2:
+        {
+          strcpy(ntpServerName, "time-a.timefreq.bldrdoc.gov");
+          Serial.println("time-a.timefreq.bldrdoc.gov");
+          server = 3;
+        }
+        break;
+      case 3:
+        {
+          strcpy(ntpServerName, "time-b.timefreq.bldrdoc.gov");
+          Serial.println("time-b.timefreq.bldrdoc.gov");
+          server = 4;
+        }
+        break;
+      case 4:
+        {
+          strcpy(ntpServerName, "time-c.timefreq.bldrdoc.gov");
+          Serial.println("time-c.timefreq.bldrdoc.gov");
+          server = 5;
+        }
+        break;
+      default:
+        {
+          strcpy(ntpServerName, "time.nist.gov");
+          Serial.println("time.nist.gov");
+          server = 0;
+        }
+        break;
     }
-  }
+
+
+    while (Udp.parsePacket() > 0) ; // discard any previously received packets
+    Serial.println("Transmit NTP Request");
+    // get a random server from the pool
+    WiFi.hostByName(ntpServerName, ntpServerIP);
+    Serial.print(ntpServerName);
+    Serial.print(": ");
+    Serial.println(ntpServerIP);
+    sendNTPpacket(ntpServerIP);
+    uint32_t beginWait = millis();
+    while (millis() - beginWait < 1500) {
+      int size = Udp.parsePacket();
+      if (size >= NTP_PACKET_SIZE) {
+        Serial.println("Receive NTP Response");
+        Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
+        unsigned long secsSince1900;
+        // convert four bytes starting at location 40 to a long integer
+        secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
+        secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
+        secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
+        secsSince1900 |= (unsigned long)packetBuffer[43];
+        //return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+        return secsSince1900 - 2208988800UL;
+      }
+    }
+
+  } while (server != 0);
   Serial.println("No NTP Response :-(");
   return 0; // return 0 if unable to get the time
 }

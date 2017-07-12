@@ -16,12 +16,25 @@ First attempt at a library. Lots more changes and fixes to do. Contributions are
 ## Wishlist
 - ~~remove dependency on EEPROM library~~
 - Fix overflow parameters
-- Code unification
+- ~~Code unification~~
 - RSL parameter real time calculation
 - Send 4 seconds data before seism detection. x-axis , y-axis , z-axis and time frame.
 - Implement RTOS
 - Implement MQTT
 - ZIC real time calculation
+- ~~Offset recalculation every x minutes/hour~~
+- ~~ID normalization~~
+- For offset use 32 data values
+- ~~Fix ntp server request and resync~~
+- Sensor server report every 2 hours
+- Setup an event && not send light protocol to quick seism detection check
+J) Podemos usar LED Verde para informar al usuario del estado operativo.
+    (por ejemplo si el auto reset considera sobre 5 seg apretado, entonces
+    un apriete rápido (<2seg), puede ejecutar una verificación interna y
+    parpadear entonces por 3 a 5 seg (rapido para un estado, lento para otro,
+    y no parpear para un tercer estado: p.e. ¿Emitió algún aviso ultimas 12hrs?
+- Sensor displacement checker (can be done with ZC)|.
+- Server side paramter settings
 
 ## Quick Start
 
