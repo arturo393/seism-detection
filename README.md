@@ -35,6 +35,14 @@ J) Podemos usar LED Verde para informar al usuario del estado operativo.
     y no parpear para un tercer estado: p.e. ¿Emitió algún aviso ultimas 12hrs?
 - Sensor displacement checker (can be done with ZC)|.
 - Server side paramter settings
+- ~~Corrección verificada de los calculos de ZC~~
+- Corrección de desbordes de valores altos de RSL y otros
+- ~~Recálculo de Offset cada 10 minutos (inihibidos en casos conversados)~~
+- Emisión de Aviso de Reporte (Sensor vivo y trabajando bien)
+- Rutina de Verificación de Disparos Reiterados No Deseables
+    (5 veces dentro de una ventana de 15seg) o bien 
+    (3 veces, separadas en más de 3seg una de otra, dentro de 1min)
+- Rutina para usar los parametros moviles incoporada y probada.
 
 ## Quick Start
 
