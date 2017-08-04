@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 #usecols=(0,6,7,8,15,16,17,18,19,20,21,22,23)
 # Read in data from file here
-array = np.loadtxt("./sensor/CA1393BA_4_8_2017_4.csv", usecols=(0,5,6,7,8,15,16,17,18,19,20,21,22), delimiter=" ", skiprows=0)
+array = np.loadtxt("./sensor/CA1393BA_4_8_2017_6.csv", usecols=(0,5,6,7,8,15,16,17,18,19,20,21,22), delimiter=" ", skiprows=10)
 print (array)
 Fs = 100;
 # Create time data for x axis based on array length
@@ -44,11 +44,11 @@ plt.show()
 
 plt.figure(3)
 plt.subplot(3, 2, 1)
-plt.plot(array)
+plt.plot(array[:,4])
 plt.yscale('linear')
 plt.title('Acelerometer Axis value')
 plt.subplot(3, 2, 3)
-plt.magnitude_spectrum(array[:,0], Fs=Fs)
+plt.magnitude_spectrum(array[:,4], Fs=Fs)
 plt.subplot(3, 2, 4)
-plt.magnitude_spectrum(array[:,0], Fs=Fs, scale='dB')
+plt.magnitude_spectrum(array[:,4], Fs=Fs, scale='dB')
 plt.show()

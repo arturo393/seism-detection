@@ -4,9 +4,12 @@ from time import gmtime, strftime
 from datetime import datetime
 import time
 import serial
+
+
+
 ser = serial.Serial('/dev/ttyUSB0', 500000);
 
-fname = 'sensor/100hz_ADXL345_v22.csv'
+fname = 'sensor/CA1393BA_4_8_2017_6.csv'
 fmode = 'ab'
 bufferIn = "";
 with open(fname, fmode) as outf:
@@ -14,13 +17,8 @@ with open(fname, fmode) as outf:
         while True:
             # Receive the data one byte at a time
             data = ser.readline();
-            bufferIn = "%s%s" % (bufferIn, data)
-            utcTime = strftime("%d-%m-%y %H:%M:%S", gmtime()) + "." + str(datetime.now().microsecond) + ","
-
-            if '\n' in data:
-            	outf.write(bufferIn[4:])
-            	print "received data:", bufferIn
-            	bufferIn = ""
+            print data
+            outf.write(data)
     except KeyboardInterrupt:
         print('exiting.')
 
