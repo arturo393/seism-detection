@@ -1,5 +1,3 @@
-/* JUEVES 27 julio al 2017
-*/
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -18,6 +16,7 @@
 #include "vector.h"
 #include <iterator>
 #include <algorithm>    // std::sort
+#include <Filters.h>    // test signal frequency (Hz) pmcFilter
 /*
 ID 1 = "Pato"
 ID 2 = "Isi"
@@ -89,6 +88,7 @@ bool MCHECK;                  // movement event checker
 bool DPCHECK;                  // displacement event checker
 bool ISAFULL;                  // Check if array samples are full true = full
 bool REPORT;                    // report status device
+bool FILTER;                    // ENABLE DISABLE FILTER
 
 // variabales counters per samples
 int psample;                   // sample counter for parameters calculation
@@ -126,6 +126,10 @@ etl::vector<short,SAMPLES> Y;
 etl::vector<short,SAMPLES> Z;
 etl::vector<long,SAMPLES> XYZ;
 
+float testFrequency = 2;                     // test signal frequency (Hz)
+FilterOnePole filterOneHighpassX( HIGHPASS, testFrequency );  // create a one pole (RC) highpass filter pmcFilter
+FilterOnePole filterOneHighpassY( HIGHPASS, testFrequency );  // create a one pole (RC) highpass filter pmcFilter
+FilterOnePole filterOneHighpassZ( HIGHPASS, testFrequency );  // create a one pole (RC) highpass filter pmcFilter
 
 // Parameter variables
 long  ACNmax, ACNmin;               // Max net acceleration
@@ -254,13 +258,12 @@ void setup()
     }
   } while (acc_id == 0);
 
-
+char _buff[4];
   switch (acc_id) {
     case LSMACC:
     {
       compass.enableDefault();
-      snprintf(ID, 4, "%d", ESP.getChipId() );
-      snprintf(ID, sizeof(ID), "IMU%d", ESP.getChipId() );
+      snprintf(ID, sizeof(ID),"IMU%d", ESP.getChipId() );
       snprintf(UBIDIR, sizeof(UBIDIR)
       , "http://things.ubidots.com/api/v1.6/devices/PS%dIMU/RSL/values?token=wsFGicZyoCaq4uVDQcDm2btS3YpahA"
       , ESP.getChipId());
@@ -269,7 +272,6 @@ void setup()
     break;
     case MMAACC:
     {
-      snprintf(ID, 4, "%d", ESP.getChipId() );
       snprintf(ID, sizeof(ID), "MMA%d", ESP.getChipId() );
       snprintf(UBIDIR, sizeof(UBIDIR)
       , "http://things.ubidots.com/api/v1.6/devices/PS%dMMA/RSL/values?token=wsFGicZyoCaq4uVDQcDm2btS3YpahA"
@@ -282,7 +284,6 @@ void setup()
       accelerometer.useInterrupt(ADXL345_INT1);
       accelerometer.setRange(ADXL345_RANGE_2G);
       accelerometer.setDataRate(ADXL345_DATARATE_400HZ);
-      snprintf(ID, 4, "%d", ESP.getChipId() );
       snprintf(ID, sizeof(ID), "ADXL%d", ESP.getChipId() );
       snprintf(UBIDIR, sizeof(UBIDIR)
       , "http://things.ubidots.com/api/v1.6/devices/PS%dADXL/RSL/values?token=wsFGicZyoCaq4uVDQcDm2btS3YpahA"
@@ -348,18 +349,20 @@ void setup()
 
   /* status variables */
   DATASEND = false;
-  ISCALC = true;
+  ISCALC = false;
   EVENT = false;
   CSERVER = true;
   REFERENCE = true;
   MCHECK = false;
   ISAFULL = false;
+  FILTER = true;
 
 
   /*Device ID */
 
   /* after 3 seconds calculate the offset */
   delay(3000);
+  if(FILTER == false)
   offset(N_OFFSET);  // 50 samples for the offset media
   Serial.println();
 
@@ -388,7 +391,7 @@ void loop()
     Serial.print(now());
     digitalClockDisplay();
 
-    td_sampling = accSampling2();
+    td_sampling = accSampling3();
 
     snprintf(line, sizeof(line), "%dsam %d[ms] %d %d %d %d", sample,td_sampling, X[0],Y[0], Z[0], XYZ[0] );
     Serial.print(line);
@@ -545,7 +548,7 @@ void loop()
 
     /* reclaculate offset and reference */
     if (!DATASEND && REFERENCE && (X.size()>= SAMPLES)) {
-      if(psample == 0){
+      if(psample == 0 && FILTER == false){
         snprintf(line, sizeof(line), "Offset(x, y, z) = (%d,%d,%d)", offset_x, offset_y, offset_z);
         Serial.print(line);
         Serial.print(" ");
@@ -599,8 +602,10 @@ void loop()
 
   trigger = 0;
   // if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
-  if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
-    if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
+  if ( (IQR > IQRref && CAV > CAVref)) {
+  //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
+  //  if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
+    if ((IQR > IQRref && CAV > CAVref)) trigger = 2;
     // if (RSL >= RSLref)  trigger = 1;
 
     if (DATASEND) {
@@ -650,6 +655,7 @@ void loop()
   if ((now() - t_offsetlap) >= (SECS_PER_MIN * T_OFFSET)) {
     t_offsetlap = now();
     if (!EVENT) {
+      if(FILTER == false)
       offset(N_OFFSET);
       REFERENCE = true;
       DATASEND = false;
@@ -739,6 +745,72 @@ int accSampling2() {
   old_z = _z;
 
   return (millis()-start);
+
+}
+
+/* Read values from accelerometer and store it in the array */
+int accSampling3() {
+  int _x , _y, _z;
+  int start;
+
+  switch (acc_id) {
+    case LSMACC:
+    {
+      compass.read();
+          filterOneHighpassX.input( compass.a.x  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+          filterOneHighpassY.input( compass.a.y  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+          filterOneHighpassZ.input( compass.a.z  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+    }
+    break;
+    case MMAACC:
+    {
+      accel.readRaw(); // mma
+          filterOneHighpassX.input( accel.x ); // update the one pole lowpass filter, and statistics pmcFilter
+          filterOneHighpassY.input( accel.y ); // update the one pole lowpass filter, and statistics pmcFilter
+          filterOneHighpassZ.input( accel.z ); // update the one pole lowpass filter, and statistics pmcFilter
+
+    }
+    break;
+    case ADXLACC:
+    {
+      sca = accelerometer.readmg();
+          filterOneHighpassX.input( sca.XAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+          filterOneHighpassY.input( sca.YAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+          filterOneHighpassZ.input( sca.ZAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+
+    }
+    break;
+    default:
+    {
+      Serial.println("MATRIX ERROR");
+    }
+    break;
+  }
+
+      _x = 0.5 * (filterOneHighpassX.output()) + 0.5 * old_x;
+      _y = 0.5 * (filterOneHighpassY.output()) + 0.5 * old_y;
+      _z = 0.5 * (filterOneHighpassZ.output()) + 0.5 * old_z;
+
+  if(X.size() == SAMPLES){
+    X.pop_back();
+    Y.pop_back();
+    Z.pop_back();
+    XYZ.pop_back();
+  }
+
+  X.insert(X.begin(),_x);
+  Y.insert(Y.begin(),_y);
+  Z.insert(Z.begin(),_z);
+
+  XYZ.insert(XYZ.begin(),sqrt(_x*_x + _y*_y + _z*_z) * 100.0);
+
+  old_x = _x;
+  old_y = _y;
+  old_z = _z;
+
+
+
+  return (millis()-start);;
 
 }
 
