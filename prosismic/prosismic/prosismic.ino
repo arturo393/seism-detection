@@ -52,8 +52,9 @@ bool myfunction (long i,long j) { return (i<j); }
 #define ADXLACC  3          // ADXL345 acceleromter ID
 byte acc_id;                // accelerometer identification
 
-int WifiPin = D6;     // wifi status LED
-int AccPin = D7;      // accelerometer data readings LED
+int EventPin = D7;     // wifi status LED
+int StatusPin = D6;      // accelerometer data readings LED
+int ButtonPin = D3;   // On/Off wifi settings
 
 /* Sampling freq */
 #define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
@@ -71,6 +72,8 @@ time_t ntpmicro;      // ntp microseconds
 time_t eventAccion;   // time after event is on
 time_t amaxm;         // millsecond of the max acceleration
 time_t t_online;      //
+time_t t_eventled;    // timer for led event display
+
 
 
 /* accelerometer parameters and variables  */
@@ -89,7 +92,7 @@ bool DPCHECK;                  // displacement event checker
 bool ISAFULL;                  // Check if array samples are full true = full
 bool REPORT;                    // report status device
 bool FILTER;                    // ENABLE DISABLE FILTER
-
+bool WIFIRST;                  // wifi reset
 // variabales counters per samples
 int psample;                   // sample counter for parameters calculation
 int s_cserver;                 // samples counter when server is not responding
@@ -103,6 +106,7 @@ int tc_mevent;                 // cunter for an event start && movement checker
 int tc_pdevent;                // for event start && displacement checker
 int tc_temp1;                   // counter temporal for PD event
 int tc_temp2;                   // counter temporal for PD event
+int tc_wifirst;                // counter for  wifi rst button
 
 //acelerometer objets
 LSM303 compass;               // acelerometer objet
@@ -166,12 +170,18 @@ char latitude[32];                         // latitude value from host
 char longitude[32];          // longitude value from host
 
 
+bool toggle = false;
+bool eventtoggle = false;
+bool statustoggle = false;
+
+
 void setup()
 {
 
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(WifiPin, OUTPUT);
-  pinMode(AccPin, OUTPUT);
+  pinMode(EventPin, OUTPUT);
+  pinMode(StatusPin, OUTPUT);
+  pinMode(ButtonPin, INPUT_PULLUP);
 
 
   Serial.begin(500000);
@@ -180,12 +190,33 @@ void setup()
   Wire.begin();       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
+  tc_wifirst = 0;
+
+  WIFIRST = true;
+  digitalWrite(LED_BUILTIN,LOW );
+  delay(2000);
+  digitalWrite(LED_BUILTIN,HIGH );
+
   //reset saved settings
   //wifiManager.resetSettings();
-
+  while (digitalRead(ButtonPin) == LOW && WIFIRST == true){
+    analogWrite(StatusPin, 256-tc_wifirst*51);
+    analogWrite(EventPin, 256- tc_wifirst*51);
+    analogWrite(LED_BUILTIN, tc_wifirst*51);
+    if(tc_wifirst >= 5){
+      wifiManager.resetSettings();
+      WIFIRST = false;
+    }
+    tc_wifirst++;
+    delay(1000);
+  }
 
   //first parameter is name of access point, second is the password
   wifiManager.autoConnect();
+
+  digitalWrite(StatusPin, LOW);
+  digitalWrite(EventPin, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
 
   Serial.println("Prosismic");
   Serial.print("Connected to ");
@@ -196,11 +227,10 @@ void setup()
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    digitalWrite(WifiPin, LOW);
   }
 
 
-  digitalWrite(WifiPin, HIGH);
+
   Serial.println("");
   Serial.print("IP number assigned by DHCP is ");
   Serial.println(WiFi.localIP());
@@ -258,7 +288,7 @@ void setup()
     }
   } while (acc_id == 0);
 
-char _buff[4];
+  char _buff[4];
   switch (acc_id) {
     case LSMACC:
     {
@@ -338,12 +368,15 @@ char _buff[4];
   /* time counter variables */
   tc_mevent = 0;
   tc_pdevent = 0;
+  tc_wifirst = 0;
 
   /* time variables */
   t_offsetlap = now();
   t_online = now();
   t_mevent = 0;
   t_dpevent = 0;
+  t_eventled = 0;
+
   wifiLap = now();
   ntpmicro = millis();
 
@@ -361,23 +394,28 @@ char _buff[4];
   /*Device ID */
 
   /* after 3 seconds calculate the offset */
-  delay(3000);
+  delay(1000);
   if(FILTER == false)
   offset(N_OFFSET);  // 50 samples for the offset media
   Serial.println();
 
 
 
-  /* start taking samples */
-  digitalWrite(AccPin, HIGH);
+  digitalWrite(StatusPin, HIGH);
+  digitalWrite(EventPin, HIGH);
   digitalWrite(LED_BUILTIN, LOW);
+  delay(1000);
 
+  digitalWrite(StatusPin, LOW);
+  digitalWrite(EventPin, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
 
 
 void loop()
 {
+
   int td_sampling;
   int td_calc;
   char line[200];
@@ -385,6 +423,7 @@ void loop()
   if (sample == SAMPLES)
   sample = 0;
   /* read values at sampling rate */
+
   if (millis() - tiempo >= INTERVALO) {
 
     tiempo = millis();
@@ -410,7 +449,8 @@ void loop()
     snprintf(line, sizeof(line),"%d %d %d %d", ZCref, IQRref, CAVref, RSLref);
     Serial.print(line);
     Serial.print(" ");
-    digitalWrite(AccPin, HIGH);
+
+
 
     trigger = 0;
 
@@ -500,10 +540,6 @@ void loop()
       }
 
       tc_pdevent++;
-
-
-
-
     }
 
 
@@ -515,7 +551,8 @@ void loop()
         eventsample = 0;
         DATASEND = true;
         EVENT = false;
-        digitalWrite(LED_BUILTIN, LOW);
+
+
       }
       else {
         Serial.print("Pause event for ");
@@ -523,7 +560,7 @@ void loop()
         Serial.print(" eventsamples");
         Serial.print(" ");
         eventsample++;
-        digitalWrite(LED_BUILTIN, HIGH);
+
       }
 
     }
@@ -535,13 +572,13 @@ void loop()
       Serial.print(" s_cserver");
       Serial.print(" ");
       s_cserver++;
-      digitalWrite(LED_BUILTIN, HIGH);
+
       /* check server count complete */
       if (s_cserver >= SAMPLES / 2) {
         s_cserver = 0;
         DATASEND = true;
         CSERVER = true;
-        digitalWrite(LED_BUILTIN, LOW);
+
       }
     }
 
@@ -589,13 +626,38 @@ void loop()
 
 
 
+
   /* sync the milliseconds with ntp time */
   if (timeStatus() != timeNotSet) {
     if (now() != prevtime) { //update the display only if time has changed
       prevtime = now();
       ntpmicro = millis();
+      toggle = !toggle;
     }
   }
+
+
+
+if((now()-t_eventled) >= 7*SECS_PER_MIN){
+  /* update every 0.5 secs */
+  if((millis()-ntpmicro) >= 500){
+    eventtoggle = false;
+  }
+  else {
+    eventtoggle = true;
+  }
+}
+else {
+  t_eventled = 0;
+  eventtoggle = false;
+}
+
+
+  digitalWrite(LED_BUILTIN,toggle);
+  digitalWrite(EventPin,eventtoggle);
+
+
+
 
 
   /* Sesim event detect and check every 1 TASD secs after first detection*/
@@ -603,15 +665,16 @@ void loop()
   trigger = 0;
   // if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
   if ( (IQR > IQRref && CAV > CAVref)) {
-  //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
-  //  if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
+    //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
+    //  if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
     if ((IQR > IQRref && CAV > CAVref)) trigger = 2;
     // if (RSL >= RSLref)  trigger = 1;
+
+    t_eventled = now();
 
     if (DATASEND) {
 
       DATASEND = false;
-      digitalWrite(LED_BUILTIN, HIGH);
 
       c_mevent++;
       if (MCHECK == false) {
@@ -631,8 +694,7 @@ void loop()
       if (!sendPost(now())) { // if the server response
         EVENT = true;
         t_offsetlap = now();
-        digitalWrite(LED_BUILTIN, LOW);
-        digitalWrite(AccPin, HIGH);
+
       }
 
       else { //if the server does not respones
@@ -640,15 +702,13 @@ void loop()
         MCHECK = false;
         DPCHECK = false;
         Serial.print("Server not found. Cannot send event");
-        digitalWrite(AccPin, LOW);
-        digitalWrite(LED_BUILTIN, LOW);
+
       }
 
       Serial.println();
     }
 
   }
-
 
 
   /* offset recalcs every TRNM minutes*/
@@ -667,7 +727,6 @@ void loop()
 
   /* Status send*/
   if ((now() - t_online) >= (SECS_PER_HOUR * T_STATUS)) {
-
     t_online = now();
     sendStatusPost(t_online);
     REPORT = true;
@@ -680,10 +739,8 @@ void loop()
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
       Serial.print(".");
-      digitalWrite(WifiPin, LOW);
+
     }
-    digitalWrite(WifiPin, HIGH);
-    //    Serial.println("");
   }
 
 }
@@ -757,26 +814,26 @@ int accSampling3() {
     case LSMACC:
     {
       compass.read();
-          filterOneHighpassX.input( compass.a.x  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
-          filterOneHighpassY.input( compass.a.y  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
-          filterOneHighpassZ.input( compass.a.z  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassX.input( compass.a.x  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassY.input( compass.a.y  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassZ.input( compass.a.z  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
     }
     break;
     case MMAACC:
     {
       accel.readRaw(); // mma
-          filterOneHighpassX.input( accel.x ); // update the one pole lowpass filter, and statistics pmcFilter
-          filterOneHighpassY.input( accel.y ); // update the one pole lowpass filter, and statistics pmcFilter
-          filterOneHighpassZ.input( accel.z ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassX.input( accel.x ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassY.input( accel.y ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassZ.input( accel.z ); // update the one pole lowpass filter, and statistics pmcFilter
 
     }
     break;
     case ADXLACC:
     {
       sca = accelerometer.readmg();
-          filterOneHighpassX.input( sca.XAxis ); // update the one pole lowpass filter, and statistics pmcFilter
-          filterOneHighpassY.input( sca.YAxis ); // update the one pole lowpass filter, and statistics pmcFilter
-          filterOneHighpassZ.input( sca.ZAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassX.input( sca.XAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassY.input( sca.YAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+      filterOneHighpassZ.input( sca.ZAxis ); // update the one pole lowpass filter, and statistics pmcFilter
 
     }
     break;
@@ -787,9 +844,9 @@ int accSampling3() {
     break;
   }
 
-      _x = 0.5 * (filterOneHighpassX.output()) + 0.5 * old_x;
-      _y = 0.5 * (filterOneHighpassY.output()) + 0.5 * old_y;
-      _z = 0.5 * (filterOneHighpassZ.output()) + 0.5 * old_z;
+  _x = 0.5 * (filterOneHighpassX.output()) + 0.5 * old_x;
+  _y = 0.5 * (filterOneHighpassY.output()) + 0.5 * old_y;
+  _z = 0.5 * (filterOneHighpassZ.output()) + 0.5 * old_z;
 
   if(X.size() == SAMPLES){
     X.pop_back();
@@ -1424,8 +1481,7 @@ int sendPost(time_t _time) {
       return 1;
     }
   } else {
-    digitalWrite(WifiPin, LOW);
-    Serial.println("Error in WiFi connection");
+
     return 1;
   }
 }
@@ -1462,8 +1518,6 @@ int sendStatus(int _status) {
       return 1;
     }
   } else {
-    digitalWrite(WifiPin, LOW);
-    Serial.println("Error in WiFi connection");
     return 1;
   }
 }
@@ -1493,8 +1547,7 @@ int sendStatusPost(time_t _time) {
       return 1;
     }
   } else {
-    digitalWrite(WifiPin, LOW);
-    Serial.println("Error in WiFi connection");
+
     return 1;
   }
 }
