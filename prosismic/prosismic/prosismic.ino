@@ -375,7 +375,7 @@ void setup()
   t_online = now();
   t_mevent = 0;
   t_dpevent = 0;
-  t_eventled = 0;
+  t_eventled =  now()-8*SECS_PER_MIN;
 
   wifiLap = now();
   ntpmicro = millis();
@@ -638,7 +638,7 @@ void loop()
 
 
 
-if((now()-t_eventled) >= 7*SECS_PER_MIN){
+if((now()-t_eventled) < 7*SECS_PER_MIN){
   /* update every 0.5 secs */
   if((millis()-ntpmicro) >= 500){
     eventtoggle = false;
@@ -647,10 +647,7 @@ if((now()-t_eventled) >= 7*SECS_PER_MIN){
     eventtoggle = true;
   }
 }
-else {
-  t_eventled = 0;
-  eventtoggle = false;
-}
+
 
 
   digitalWrite(LED_BUILTIN,toggle);
