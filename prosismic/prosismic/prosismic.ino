@@ -632,26 +632,53 @@ void loop()
     if (now() != prevtime) { //update the display only if time has changed
       prevtime = now();
       ntpmicro = millis();
-      toggle = !toggle;
+
+      if(DATASEND == true){
+        statustoggle = false; // check
+        eventtoggle = false;  // check
+        toggle = !toggle;
+      }
+      else {
+
+        statustoggle =  eventtoggle;
+        eventtoggle = !statustoggle;
+        toggle = true;
+      }
     }
   }
 
+  /* led display */
+  if (EVENT == true){
+    toggle = true;
+    statustoggle = false; // check
+    eventtoggle = !eventtoggle;  // check
+  }
+
+  else { // EVENT == false
+
+    /* led event display*/
+    if(((now()-t_eventled) < 7*SECS_PER_MIN) && DATASEND == true){
+      /* update every 0.5 secs */
+      if((millis()-ntpmicro) >= 500){
+        statustoggle = false;
+      }
+      else {
+        statustoggle = true;
+      }
+    }
 
 
-if((now()-t_eventled) < 7*SECS_PER_MIN){
-  /* update every 0.5 secs */
-  if((millis()-ntpmicro) >= 500){
-    eventtoggle = false;
+
   }
-  else {
-    eventtoggle = true;
-  }
-}
+
+
+
 
 
 
   digitalWrite(LED_BUILTIN,toggle);
   digitalWrite(EventPin,eventtoggle);
+  digitalWrite(StatusPin,statustoggle);
 
 
 
@@ -671,6 +698,7 @@ if((now()-t_eventled) < 7*SECS_PER_MIN){
 
     if (DATASEND) {
 
+
       DATASEND = false;
 
       c_mevent++;
@@ -688,10 +716,12 @@ if((now()-t_eventled) < 7*SECS_PER_MIN){
       }
 
 
+      eventtoggle = true;
+
       if (!sendPost(now())) { // if the server response
         EVENT = true;
         t_offsetlap = now();
-
+        eventtoggle = false;
       }
 
       else { //if the server does not respones
@@ -699,7 +729,6 @@ if((now()-t_eventled) < 7*SECS_PER_MIN){
         MCHECK = false;
         DPCHECK = false;
         Serial.print("Server not found. Cannot send event");
-
       }
 
       Serial.println();
