@@ -6,7 +6,7 @@ import time
 import serial
 ser = serial.Serial('/dev/ttyUSB0', 500000);
 
-fname = 'sensor/100hz_ADXL345_v22.csv'
+fname = './paramcheck.csv'
 fmode = 'ab'
 bufferIn = "";
 with open(fname, fmode) as outf:
