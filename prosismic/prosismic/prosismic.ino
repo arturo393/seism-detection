@@ -212,6 +212,9 @@ void setup()
     delay(1000);
   }
 
+  digitalWrite(LED_BUILTIN,LOW);
+  digitalWrite(StatusPin, HIGH);
+  digitalWrite(EventPin, HIGH);
   //first parameter is name of access point, second is the password
   wifiManager.autoConnect();
 
@@ -238,6 +241,11 @@ void setup()
 
   Serial.println("Starting UDP");
 
+  delay(300);
+
+  digitalWrite(LED_BUILTIN,LOW);
+  digitalWrite(StatusPin, HIGH);
+  digitalWrite(EventPin, HIGH);
   /* NTP time config*/
   Udp.begin(localPort);
   Serial.print("Local port: ");
@@ -245,11 +253,30 @@ void setup()
   Serial.println("waiting for sync");
   time_t t_ntp = 0;
 
+  digitalWrite(StatusPin, LOW);
+  digitalWrite(EventPin, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
+
+  delay(300);
+
+  digitalWrite(LED_BUILTIN,LOW);
+  digitalWrite(StatusPin, HIGH);
+  digitalWrite(EventPin, HIGH);
+
   setSyncProvider(getNtpTime);
   setSyncInterval(SECS_PER_HOUR * 1);
   Serial.print("Current time: ");
   digitalClockDisplay();
 
+  digitalWrite(StatusPin, LOW);
+  digitalWrite(EventPin, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
+
+  delay(300);
+
+  digitalWrite(LED_BUILTIN,LOW);
+  digitalWrite(StatusPin, HIGH);
+  digitalWrite(EventPin, HIGH);
 
 
 
@@ -263,9 +290,15 @@ void setup()
   Serial.println(longitude);
   Serial.println("Accuracy: " + String(loc.accuracy));
 
+  digitalWrite(StatusPin, LOW);
+  digitalWrite(EventPin, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
 
+  delay(300);
 
-
+  digitalWrite(LED_BUILTIN,LOW);
+  digitalWrite(StatusPin, HIGH);
+  digitalWrite(EventPin, HIGH);
   /* acclereometer setup , see library for details */
   acc_id = 0;
   do {
@@ -329,8 +362,15 @@ void setup()
     break;
   }
 
+  digitalWrite(StatusPin, LOW);
+  digitalWrite(EventPin, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
 
+  delay(300);
 
+  digitalWrite(LED_BUILTIN,LOW);
+  digitalWrite(StatusPin, HIGH);
+  digitalWrite(EventPin, HIGH);
 
   /* setup init values */
   for (int k = 0; k < SAMPLES ; k++) {
