@@ -207,10 +207,15 @@ void setup()
     if(tc_wifirst >= 5){
       wifiManager.resetSettings();
       WIFIRST = false;
+      analogWrite(StatusPin, 0);
+      analogWrite(EventPin, 0);
+      analogWrite(LED_BUILTIN, HIGH);
     }
     tc_wifirst++;
     delay(1000);
   }
+
+
 
   digitalWrite(LED_BUILTIN,LOW);
   digitalWrite(StatusPin, HIGH);
@@ -431,6 +436,9 @@ void setup()
   ISAFULL = false;
   FILTER = true;
 
+  toggle = true;
+  eventtoggle = false;
+  statustoggle = false;
 
   /*Device ID */
 
