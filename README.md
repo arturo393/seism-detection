@@ -43,6 +43,8 @@ J) Podemos usar LED Verde para informar al usuario del estado operativo.
     (5 veces dentro de una ventana de 15seg) o bien 
     (3 veces, separadas en más de 3seg una de otra, dentro de 1min)
 - Rutina para usar los parametros moviles incoporada y probada.
+- Circuit design for one pcb board.
+- 
 
 ## Quick Start
 
