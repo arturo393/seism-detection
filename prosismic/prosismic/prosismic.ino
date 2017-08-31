@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-/* VIERNES 28 julio al 2017
-*/
-=======
->>>>>>> c1622fe70e42c65b35a0fb7d2d95cb2491693a92
-
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
@@ -98,6 +92,8 @@ bool ISAFULL;                  // Check if array samples are full true = full
 bool REPORT;                    // report status device
 bool FILTER;                    // ENABLE DISABLE FILTER
 bool WIFIRST;                  // wifi reset
+
+
 // variabales counters per samples
 int psample;                   // sample counter for parameters calculation
 int s_cserver;                 // samples counter when server is not responding
@@ -757,14 +753,14 @@ void loop()
   }
 
   /* Status send*/
-  if ((now() - t_online) >= (SECS_PER_HOUR * T_STATUS)) {
+  if ((now() - t_online) >= (SECS_PER_MIN * T_STATUS)) {
     t_online = now();
-    sendStatusPost(t_online);
+    sendStatus(1);
     REPORT = true;
   }
 
   /* Check wifi connection */
-  if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
+  if ((now() - wifiLap) == (SECS_PER_HOUR * TWC)) {
     wifiLap = now();
     /* wait until wifi is connected*/
     while (WiFi.status() != WL_CONNECTED) {
