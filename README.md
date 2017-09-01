@@ -1,5 +1,5 @@
-# Código para la detecci'on de sismos 
-Arduino code for the ESP8266 NodeMcu 1.0 dev board and 3 type of acelerometers.
+# Código para la detección de sismos 
+Código Arduino para el firmware NodeMcu 1.0 y 3 tipos de acelerometros.
 - SparkFun Triple Axis Accelerometer Breakout - MMA8452Q https://www.sparkfun.com/products/12756
 - MinIMU-9 v2 Gyro, Accelerometer, and Compass (L3GD20 and LSM303DLHC Carrier) https://www.pololu.com/product/1268
 - SparkFun Triple Axis Accelerometer Breakout - ADXL345 https://www.sparkfun.com/products/9836
@@ -7,28 +7,10 @@ Arduino code for the ESP8266 NodeMcu 1.0 dev board and 3 type of acelerometers.
 
 First attempt at a library. Lots more changes and fixes to do. Contributions are welcome.
 
-#### This works with the ESP8266 Arduino platform with a recent stable release(2.0.0 or newer) https://github.com/esp8266/Arduino
+#### Este código funciona con la plataforma ESP8266 Arduino , mas detalles sobre la instalación para desarrollar en https://github.com/esp8266/Arduino
 
 
-
-### Instalación
-You can either install through the Arduino Library Manager or checkout the latest changes or a release from github
-
-#### Install through Library Manager
-__Currently version 0.8+ works with release 2.0.0 or newer of the [ESP8266 core for Arduino](https://github.com/esp8266/Arduino)__
- - in Arduino IDE got to Sketch/Include Library/Manage Libraries
-  ![Manage Libraries](http://i.imgur.com/9BkEBkR.png)
-
- - search for WiFiManager
-  ![WiFiManager package](http://i.imgur.com/18yIai8.png)
-
- - click Install and start [using it](#using)
-
-####  Checkout from github
-__Github version works with release 2.0.0 or newer of the [ESP8266 core for Arduino](https://github.com/esp8266/Arduino)__
-- Checkout library to your Arduino libraries folder
-
-####  Libraries Needed
+####  Libreras necesarias
 - Arduino Time Library https://github.com/PaulStoffregen/Time
 - ArduinoSort https://github.com/emilv/ArduinoSort
 - ArduinoJson https://github.com/bblanchon/ArduinoJson
@@ -39,30 +21,12 @@ __Github version works with release 2.0.0 or newer of the [ESP8266 core for Ardu
 - Arduino-ADXL345 https://github.com/jarzebski/Arduino-ADXL345
 
 
-
-### Using
-- Include in your sketch
-```cpp
-#include <ESP8266WiFi.h>
-#include <WiFiUdp.h>
-#include <TimeLib.h>
-#include <Wire.h>
-#include <LSM303.h>
-#include <ESP8266HTTPClient.h>
-#include <ArduinoSort.h>
-#include <ArduinoJson.h>
-#include <WifiLocation.h>
-#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
-#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
-#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
-```
-
-## Documentation
+## Documentación
+Revisar la sección https://github.com/arturo393/seism-detection/wiki para más detalles del funcionaminamiento.
 
 
-#### Debug
-Debug is enabled by default on Serial. 
-Sample data output
+#### Salida Serial
+Para analizar los datos de salida checkear el puerto serial. Un ejemplo de los datos con su hearder es:
 ```cpp
  Date Time(hh:mm:ss:mss) Sample x y x NetAcc xMax yMax zMax NetAccMax t_NetAccMax ZC IQR CAV RSL
  
@@ -74,16 +38,6 @@ Sample data output
 
 
 ```
-##Hardware
-EAGLE files can be found on Hardware folder. And a autocad files and BOM can be found here https://circuits.io/circuits/5318012
-## Releases
-##### v0.1
+## Hardware
+Se pueden encontrar archvios para EAGLE pero es una versión no probada.
 
-
-
-### Contributions and thanks
-The support and help I got from the community has been nothing short of phenomenal. I can't thank you guys enough. This is my first real attept in developing open source stuff and I must say, now I understand why people are so dedicated to it, it is because of all the wonderful people involved.
-
-__THANK YOU__
-
-#### Inspiration
