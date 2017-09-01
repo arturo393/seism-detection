@@ -1,4 +1,4 @@
-# Seism-Detection ESP8266-Arduino library
+# Código para la detecci'on de sismos 
 Arduino code for the ESP8266 NodeMcu 1.0 dev board and 3 type of acelerometers.
 - SparkFun Triple Axis Accelerometer Breakout - MMA8452Q https://www.sparkfun.com/products/12756
 - MinIMU-9 v2 Gyro, Accelerometer, and Compass (L3GD20 and LSM303DLHC Carrier) https://www.pololu.com/product/1268
@@ -11,44 +11,7 @@ First attempt at a library. Lots more changes and fixes to do. Contributions are
 
 
 
-
-
-## Wishlist
-- ~~remove dependency on EEPROM library~~
-- Fix overflow parameters
-- ~~Code unification~~
-- RSL parameter real time calculation
-- Send 4 seconds data before seism detection. x-axis , y-axis , z-axis and time frame.
-- Implement RTOS
-- Implement MQTT
-- ZIC real time calculation
-- ~~Offset recalculation every x minutes/hour~~
-- ~~ID normalization~~
-- For offset use 32 data values
-- ~~Fix ntp server request and resync~~
-- Sensor server report every 2 hours
-- Setup an event && not send light protocol to quick seism detection check
-J) Podemos usar LED Verde para informar al usuario del estado operativo.
-    (por ejemplo si el auto reset considera sobre 5 seg apretado, entonces
-    un apriete rápido (<2seg), puede ejecutar una verificación interna y
-    parpadear entonces por 3 a 5 seg (rapido para un estado, lento para otro,
-    y no parpear para un tercer estado: p.e. ¿Emitió algún aviso ultimas 12hrs?
-- Sensor displacement checker (can be done with ZC)|.
-- Server side paramter settings
-- ~~Corrección verificada de los calculos de ZC~~
-- Corrección de desbordes de valores altos de RSL y otros
-- ~~Recálculo de Offset cada 10 minutos (inihibidos en casos conversados)~~
-- Emisión de Aviso de Reporte (Sensor vivo y trabajando bien)
-- Rutina de Verificación de Disparos Reiterados No Deseables
-    (5 veces dentro de una ventana de 15seg) o bien 
-    (3 veces, separadas en más de 3seg una de otra, dentro de 1min)
-- Rutina para usar los parametros moviles incoporada y probada.
-- Circuit design for one pcb board.
-- 
-
-## Quick Start
-
-### Installing
+### Instalación
 You can either install through the Arduino Library Manager or checkout the latest changes or a release from github
 
 #### Install through Library Manager
