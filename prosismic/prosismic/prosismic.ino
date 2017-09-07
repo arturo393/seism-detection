@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
+//#include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <Wire.h>
@@ -81,17 +81,17 @@ char UBIDIR[200];             //UBIDOTS direccion
 
 
 // status variables
-bool ISCALC;                  // parameter calculation enable/disable
-bool EVENT;                   // event detection on/off
-bool REFERENCE;               // parameter calculation event
-bool CSERVER;                 // check if central server is responding on/off
-bool DATASEND;                // enable/disable send event to server
-bool MCHECK;                  // movement event checker
-bool DPCHECK;                  // displacement event checker
-bool ISAFULL;                  // Check if array samples are full true = full
-bool REPORT;                    // report status device
-bool FILTER;                    // ENABLE DISABLE FILTER
-bool WIFIRST;                  // wifi reset
+  bool ISCALC;                  // parameter calculation enable/disable
+  bool EVENT;                   // event detection on/off
+  bool REFERENCE;               // parameter calculation event
+  bool CSERVER;                 // check if central server is responding on/off
+  bool DATASEND;                // enable/disable send event to server
+  bool MCHECK;                  // movement event checker
+  bool DPCHECK;                  // displacement event checker
+  bool ISAFULL;                  // Check if array samples are full true = full
+  bool REPORT;                    // report status device
+  bool FILTER;                    // ENABLE DISABLE FILTER
+  bool WIFIRST;                  // wifi reset
 
 
 // variabales counters per samples
@@ -661,7 +661,7 @@ void loop()
 
     if(REPORT == true){
       Serial.print("Sensor Report Status");
-      REPORT == false;
+      REPORT = false;
     }
 
 
@@ -801,7 +801,7 @@ void loop()
   }
 
   /* Status send*/
-  if ((now() - t_online) >= (SECS_PER_MIN * T_STATUS)) {
+  if ((now() - t_online) >= (SECS_PER_HOUR * T_STATUS)) {
     t_online = now();
     sendStatus(1);
     REPORT = true;
