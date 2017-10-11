@@ -19,7 +19,10 @@ timestamp = time.strftime('%b-%d-%Y_%H%M', t)
 BACKUP_NAME = ("./data/CC4615BA-" + timestamp +".csv")
 ser = serial.Serial('/dev/ttyUSB0', 500000);
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9718f712fb9ec07cc811aa163a91cb5a60610289
 #BACKUP_NAME = ("./data/ST1679BA-" + timestamp +".csv")
 #ser = serial.Serial('/dev/ttyUSB3', 500000);
 
