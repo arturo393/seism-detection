@@ -1,14 +1,16 @@
-#include <Arduino.h>
+#include <WifiLocation.h>
+//#include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <TimeLib.h>
+
 #include <Wire.h>
 #include <LSM303.h>
 #include <ADXL345.h>
 #include <SparkFun_MMA8452Q.h>
 #include <ESP8266HTTPClient.h>
 //#include <ArduinoJson.h>
-#include <WifiLocation.h>
+
 #include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
@@ -428,7 +430,7 @@ void setup()
 
   /* status variables */
   DATASEND = false;
-  ISCALC = false;
+  ISCALC = true;
   EVENT = false;
   CSERVER = true;
   REFERENCE = true;
