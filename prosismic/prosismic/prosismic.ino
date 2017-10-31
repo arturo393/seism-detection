@@ -1,5 +1,5 @@
 #include <Arduino.h>
-//#include <ESP8266WiFi.h>
+#include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <Wire.h>
@@ -81,17 +81,17 @@ char UBIDIR[200];             //UBIDOTS direccion
 
 
 // status variables
-  bool ISCALC;                  // parameter calculation enable/disable
-  bool EVENT;                   // event detection on/off
-  bool REFERENCE;               // parameter calculation event
-  bool CSERVER;                 // check if central server is responding on/off
-  bool DATASEND;                // enable/disable send event to server
-  bool MCHECK;                  // movement event checker
-  bool DPCHECK;                  // displacement event checker
-  bool ISAFULL;                  // Check if array samples are full true = full
-  bool REPORT;                    // report status device
-  bool FILTER;                    // ENABLE DISABLE FILTER
-  bool WIFIRST;                  // wifi reset
+bool ISCALC;                  // parameter calculation enable/disable
+bool EVENT;                   // event detection on/off
+bool REFERENCE;               // parameter calculation event
+bool CSERVER;                 // check if central server is responding on/off
+bool DATASEND;                // enable/disable send event to server
+bool MCHECK;                  // movement event checker
+bool DPCHECK;                  // displacement event checker
+bool ISAFULL;                  // Check if array samples are full true = full
+bool REPORT;                    // report status device
+bool FILTER;                    // ENABLE DISABLE FILTER
+bool WIFIRST;                  // wifi reset
 
 
 // variabales counters per samples
@@ -740,7 +740,7 @@ void loop()
   if ( (IQR > IQRref && CAV > CAVref)) {
     //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
     //  if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
-    if ((IQR > IQRref && CAV > CAVref)) trigger = 2;
+    if ((IQR > IQRref && CAV > CAVref)) trigger = 3;
     // if (RSL >= RSLref)  trigger = 1;
 
     t_eventled = now();

@@ -37,7 +37,7 @@
 #define OFFSET true              // set median dc offset remove
 #define REF_VAR  false          // indicate if reference are variables or fixed values
 
-int WifiPin = D7;     // wifi status LED
+int WifiPin = D5;     // wifi status LED
 int AccPin = D6;      // accelerometer data readings LED
 
 /* Sampling freq */
@@ -138,7 +138,8 @@ void setup()
 
   Serial.begin(500000);
   // Wire.begin(int sda, int scl)
-  Wire.begin(4, 5);       // join i2c bus (address optional for master)
+ // Wire.begin(4, 5);       // join i2c bus (address optional for master)
+  Wire.begin();       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
 
@@ -589,7 +590,6 @@ void restore_parameters() {
   ZCmin = 0;
 }
 
-
 void offset(int samples) {
   int j = 0;
   offset_x = 0;
@@ -612,7 +612,7 @@ void offset(int samples) {
   offset_z = offset_z / samples;
   char line[30];
   snprintf(line, sizeof(line), "Xoffset %l Yoffset %l zoffset %l",offset_x,offset_y,offset_z);
-  Serial.print(line);
+  Serial.print(line); 
 
 }
 

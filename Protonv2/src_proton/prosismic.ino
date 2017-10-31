@@ -12,6 +12,7 @@
 #include <iterator>
 #include <algorithm>    // std::sort
 #include <Filters.h>    // test signal frequency (Hz) pmcFilter
+
 /*
 ID 1 = "Pato"
 ID 2 = "Isi"
@@ -19,6 +20,7 @@ ID 3 = "Chrysalis"
 ID 4 = "Zeke I+D"
 ID 5 = "Zeke Stgo"
 */
+
 bool myfunction (long i,long j) { return (i<j); }
 
 #define N_OFFSET 32

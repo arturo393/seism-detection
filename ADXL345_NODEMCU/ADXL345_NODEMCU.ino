@@ -11,6 +11,11 @@
 #include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+#include "UbidotsESPMQTT.h"
+
+#define TOKEN "wsFGicZyoCaq4uVDQcDm2btS3YpahA" // Your Ubidots TOKEN
+#define WIFINAME "....." //Your SSID
+#define WIFIPASS "....." // Your Wifi Pass
 
 /*
   ID 1 = "Pato"
@@ -142,6 +147,24 @@ WifiLocation location(googleApiKey);
 location_t loc;
 WiFiManager wifiManager;    // for wifi ssid and password configuration
 
+Ubidots client(TOKEN);
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i=0;i<length;i++) {
+    Serial.print((char)payload[i]);
+  }
+  if ((char)payload[0]=='1'){
+    digitalWrite(16, HIGH);
+  }
+  else{
+    digitalWrite(16, LOW);
+  }
+  Serial.println();
+}
+
 void setup()
 {
 
@@ -152,6 +175,7 @@ void setup()
   digitalWrite(WifiPin, LOW);
 
   Serial.begin(500000);
+  
   // Wire.begin(int sda, int scl)
   Wire.begin(4, 5);       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
@@ -162,7 +186,7 @@ void setup()
 
   Serial.println("Prosismic");
   Serial.print("Connecting to ");
-  //  Serial.println(ssid);
+  Serial.println(getConfigPortalSSID());
   //  WiFi.begin(ssid, pass);
 
   /* wait until wifi is connected*/
@@ -333,7 +357,7 @@ void loop()
     t_offsetlap = now();
     offset(50);
   }
-  
+
   if ((now() - wifiLap) == (SECS_PER_MIN * TWC)) {
     wifiLap = now();
     /* wait until wifi is connected*/
@@ -630,7 +654,7 @@ void offset(int samples) {
   offset_z = offset_z / samples;
   char line[30];
   snprintf(line, sizeof(line), "Xoffset %l Yoffset %l zoffset %l", offset_x, offset_y, offset_z);
-  Serial.print(line);  
+  Serial.print(line);
 }
 
 /* Ip geolotacion */

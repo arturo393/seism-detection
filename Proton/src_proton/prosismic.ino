@@ -40,6 +40,8 @@ byte acc_id;                // accelerometer identification
 
 int WifiPin = D5;     // wifi status LED
 int AccPin = D6;      // accelerometer data readings LED
+int OffsetPin = D3;     // wifi status LED
+int EventPin = D4;      // accelerometer data readings LED
 
 /* Sampling freq */
 #define FrecRPS  100                   // Tasa de muestreo definida por el usuario (100 a 200)
@@ -132,6 +134,7 @@ char latitude[32];                         // latitude value from host
 char longitude[32];                        // longitude value from host
 const unsigned long HTTP_TIMEOUT = 10000;  // max respone time from server
 const size_t MAX_CONTENT_SIZE = 512;       // max size of the HTTP response
+UDP  Udp;
 
 
 void setup()
@@ -148,6 +151,17 @@ void setup()
   Wire.begin();       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
+
+  /* NTP time config*/
+  Udp.begin(localPort);
+  Serial.print("Local port: ");
+  Serial.println(Udp.remotePort());
+  Serial.println("waiting for sync");
+  setSyncProvider(getNtpTime);
+  setSyncInterval(SECS_PER_HOUR * 1);
+  Serial.print("Current time: ");
+
+
 
   /* acclereometer setup , see library for details */
   acc_id = 0;
@@ -858,7 +872,7 @@ void print_mag(int _sample) {
 void digitalClockDisplay()
 {
   Serial.println(Time.timeStr()); // Wed May 21 01:08:47 201
-  Serial.pint(".")
+  Serial.print(".");
   printmillisntp(millis());
   Serial.print("   ");
 }
@@ -866,4 +880,107 @@ void digitalClockDisplay()
 void printmillisntp(time_t _millis) {
   Serial.print((_millis - ntpmicro) % 1000);
   Serial.print("   ");
+}
+
+
+/*-------- NTP code ----------*/
+
+const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
+byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
+
+time_t getNtpTime()
+{
+  IPAddress ntpServerIP; // NTP server's ip address
+  byte server = 1;
+  do {
+    switch (server) {
+      case 1:
+      {
+        strcpy(ntpServerName, "us.pool.ntp.org");
+        //    Serial.println("us.pool.ntp.org");
+        server = 2;
+      }
+      break;
+      case 2:
+      {
+        strcpy(ntpServerName, "time-a.timefreq.bldrdoc.gov");
+        //  Serial.println("time-a.timefreq.bldrdoc.gov");
+        server = 3;
+      }
+      break;
+      case 3:
+      {
+        strcpy(ntpServerName, "time-b.timefreq.bldrdoc.gov");
+        //  Serial.println("time-b.timefreq.bldrdoc.gov");
+        server = 4;
+      }
+      break;
+      case 4:
+      {
+        strcpy(ntpServerName, "time-c.timefreq.bldrdoc.gov");
+        //  Serial.println("time-c.timefreq.bldrdoc.gov");
+        server = 5;
+      }
+      break;
+      default:
+      {
+        strcpy(ntpServerName, "time.nist.gov");
+        //  Serial.println("time.nist.gov");
+        server = 0;
+      }
+      break;
+    }
+
+
+    while (Udp.parsePacket() > 0) ; // discard any previously received packets
+    //Serial.println("Transmit NTP Request");
+    // get a random server from the pool
+    WiFi.hostByName(ntpServerName, ntpServerIP);
+    //Serial.print(ntpServerName);
+    //Serial.print(": ");
+    //Serial.println(ntpServerIP);
+    sendNTPpacket(ntpServerIP);
+    uint32_t beginWait = millis();
+    while (millis() - beginWait < 1500) {
+      int size = Udp.parsePacket();
+      if (size >= NTP_PACKET_SIZE) {
+        //Serial.println("Receive NTP Response");
+        Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
+        unsigned long secsSince1900;
+        // convert four bytes starting at location 40 to a long integer
+        secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
+        secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
+        secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
+        secsSince1900 |= (unsigned long)packetBuffer[43];
+        //return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+        return secsSince1900 - 2208988800UL;
+      }
+    }
+
+  } while (server != 0);
+  //Serial.println("No NTP Response :-(");
+  return 0; // return 0 if unable to get the time
+}
+
+// send an NTP request to the time server at the given address
+void sendNTPpacket(IPAddress & address)
+{
+  // set all bytes in the buffer to 0
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  // Initialize values needed to form NTP request
+  // (see URL above for details on the packets)
+  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
+  packetBuffer[1] = 0;     // Stratum, or type of clock
+  packetBuffer[2] = 6;     // Polling Interval
+  packetBuffer[3] = 0xEC;  // Peer Clock Precision
+  // 8 bytes of zero for Root Delay & Root Dispersion
+  packetBuffer[12] = 49;
+  packetBuffer[13] = 0x4E;
+  packetBuffer[14] = 49;
+  packetBuffer[15] = 52;
+  // all NTP fields have been given values, now
+  // you can send a packet requesting a timestamp:
+  Udp.beginPacket(address, 123); //NTP requests are to port 123
+  Udp.write(packetBuffer, NTP_PACKET_SIZE);
+  Udp.endPacket();
 }
