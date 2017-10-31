@@ -1,0 +1,36 @@
+{
+    "name": "SparkFun_MMA8452Q", 
+    "repository": {
+        "url": "https://github.com/sparkfun/SparkFun_MMA8452Q_Arduino_Library.git", 
+        "type": "git"
+    }, 
+    "platforms": [
+        "atmelavr", 
+        "atmelsam", 
+        "espressif8266", 
+        "intel_arc32", 
+        "microchippic32", 
+        "nordicnrf51", 
+        "teensy", 
+        "timsp430"
+    ], 
+    "frameworks": [
+        "arduino"
+    ], 
+    "version": "1.2.0", 
+    "authors": [
+        {
+            "maintainer": false, 
+            "name": "SparkFun Electronics", 
+            "url": "https://github.com/sparkfun", 
+            "email": null
+        }
+    ], 
+    "keywords": [
+        "i2c", 
+        "sensor", 
+        "accelerometer"
+    ], 
+    "id": 164, 
+    "description": "Basic I2C functionality of the MMA8452Q Accelerometer Breakout"
+}
