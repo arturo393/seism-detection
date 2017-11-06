@@ -1,4 +1,4 @@
-# Código para la detección de sismos 
+# Código para la detección de sismos Versión 1
 Código Arduino para el firmware NodeMcu 1.0 y 3 tipos de acelerometros.
 - SparkFun Triple Axis Accelerometer Breakout - MMA8452Q https://www.sparkfun.com/products/12756
 - MinIMU-9 v2 Gyro, Accelerometer, and Compass (L3GD20 and LSM303DLHC Carrier) https://www.pololu.com/product/1268
@@ -38,6 +38,13 @@ Para analizar los datos de salida checkear el puerto serial. Un ejemplo de los d
 
 
 ```
-## Hardware
-Se pueden encontrar archvios para EAGLE pero es una versión no probada.
+# Código para la detección de sismos Versión 2
+Se cambia el microcontrolador al Photon de particle https://store.particle.io  por lo tanto se cambia el código y las librerias necesarias para hacer funcionar el algoritmo. Basicamente la detección sigue la misma lógica que la versin 1 pero tiene modificaciones en la parte de configuración. Además se actualiza a al MinIMU-V5 https://www.pololu.com/product/2738 que utiliza el acelerómetro LIS3MDL https://www.pololu.com/file/download/LIS3MDL.pdf?file_id=0J1089
 
+## Librerias necesarias
+- 
+- 
+- 
+- 
+
+## Documentacin reviasr la sección https://github.com/arturo393/seism-detection/wiki
