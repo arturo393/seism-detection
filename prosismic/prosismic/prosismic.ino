@@ -18,13 +18,6 @@
 #include <iterator>
 #include <algorithm>    // std::sort
 #include <Filters.h>    // test signal frequency (Hz) pmcFilter
-/*
-ID 1 = "Pato"
-ID 2 = "Isi"
-ID 3 = "Chrysalis"
-ID 4 = "Zeke I+D"
-ID 5 = "Zeke Stgo"
-*/
 bool myfunction (long i,long j) { return (i<j); }
 
 #define N_OFFSET 32
@@ -79,8 +72,6 @@ time_t t_eventled;    // timer for led event display
 
 /* accelerometer parameters and variables  */
 char ID[15];                  // device number identification
-char UBIDIR[200];             //UBIDOTS direccion
-
 
 // status variables
 bool ISCALC;                  // parameter calculation enable/disable
@@ -188,8 +179,6 @@ void setup()
 
 
   Serial.begin(500000);
-  // Wire.begin(int sda, int scl)
-  // Wire.begin(4, 5);       // join i2c bus (address optional for master)
   Wire.begin();       // join i2c bus (address optional for master)
   while (!Serial) ; // Needed for Leonardo only
   delay(250);
@@ -200,8 +189,6 @@ void setup()
   delay(2000);
   digitalWrite(LED_BUILTIN,HIGH );
 
-  //reset saved settings
-  //wifiManager.resetSettings();
   while (digitalRead(ButtonPin) == LOW && WIFIRST == true){
     analogWrite(StatusPin, 256-tc_wifirst*51);
     analogWrite(EventPin, 256- tc_wifirst*51);
@@ -231,8 +218,6 @@ void setup()
 
   Serial.println("Prosismic");
   Serial.print("Connected to ");
-  // Serial.println(ssid);
-  // WiFi.begin(ssid, pass);
 
   /* wait until wifi is connected */
   while (WiFi.status() != WL_CONNECTED) {
@@ -329,45 +314,6 @@ void setup()
     }
   } while (acc_id == 0);
 
-  char _buff[4];
-  switch (acc_id) {
-    case LSMACC:
-    {
-      compass.enableDefault();
-      snprintf(ID, sizeof(ID),"IMU%d", ESP.getChipId() );
-      snprintf(UBIDIR, sizeof(UBIDIR)
-      , "http://things.ubidots.com/api/v1.6/devices/PS%dIMU/RSL/values?token=wsFGicZyoCaq4uVDQcDm2btS3YpahA"
-      , ESP.getChipId());
-      Serial.println("LSM303DLH setup complete!");
-    }
-    break;
-    case MMAACC:
-    {
-      snprintf(ID, sizeof(ID), "MMA%d", ESP.getChipId() );
-      snprintf(UBIDIR, sizeof(UBIDIR)
-      , "http://things.ubidots.com/api/v1.6/devices/PS%dMMA/RSL/values?token=wsFGicZyoCaq4uVDQcDm2btS3YpahA"
-      , ESP.getChipId());
-      Serial.println("MMA8452Q setup complete!");
-    }
-    break;
-    case ADXLACC:
-    {
-      accelerometer.useInterrupt(ADXL345_INT1);
-      accelerometer.setRange(ADXL345_RANGE_2G);
-      accelerometer.setDataRate(ADXL345_DATARATE_400HZ);
-      snprintf(ID, sizeof(ID), "ADXL%d", ESP.getChipId() );
-      snprintf(UBIDIR, sizeof(UBIDIR)
-      , "http://things.ubidots.com/api/v1.6/devices/PS%dADXL/RSL/values?token=wsFGicZyoCaq4uVDQcDm2btS3YpahA"
-      , ESP.getChipId());
-      Serial.println("ADXL345 setup complete !");
-    }
-    break;
-    default:
-    {
-      Serial.println("MATRIX ERROR");
-    }
-    break;
-  }
 
   digitalWrite(StatusPin, LOW);
   digitalWrite(EventPin, LOW);
@@ -430,7 +376,7 @@ void setup()
 
   /* status variables */
   DATASEND = false;
-  ISCALC = true;
+  ISCALC = false;
   EVENT = false;
   CSERVER = true;
   REFERENCE = true;
@@ -447,7 +393,7 @@ void setup()
   /* after 3 seconds calculate the offset */
   delay(1000);
   if(FILTER == false)
-  offset(N_OFFSET);  // 50 samples for the offset media
+    offset(N_OFFSET);  // 50 samples for the offset media
   Serial.println();
 
 
@@ -464,15 +410,14 @@ void setup()
 
 
 
-void loop()
-{
+void loop(){
 
   int td_sampling;
   int td_calc;
   char line[200];
   /* restore sampling window */
   if (sample == SAMPLES)
-  sample = 0;
+    sample = 0;
   /* read values at sampling rate */
 
   if (millis() - tiempo >= INTERVALO) {
@@ -481,13 +426,13 @@ void loop()
     Serial.print(now());
     digitalClockDisplay();
 
-    td_sampling = accSampling3();
+    td_sampling = accSampling();
 
     snprintf(line, sizeof(line), "%dsam %d[ms] %d %d %d %d", sample,td_sampling, X[0],Y[0], Z[0], XYZ[0] );
     Serial.print(line);
     Serial.print(" ");
 
-    td_calc = calcParam2(sample);
+    td_calc = calcParam(sample);
 
     snprintf(line, sizeof(line)," %d[ms] %d %d %d %d",td_calc, acc_xMax, acc_yMax, acc_zMax, ACNmax);
     Serial.print(line);
@@ -528,7 +473,7 @@ void loop()
         tc_mevent = 0;
         c_mevent = 0;
         if (EVENT == false)
-        MCHECK = false;
+          MCHECK = false;
       }
     }
 
@@ -666,6 +611,9 @@ void loop()
       REPORT = false;
     }
 
+    Serial.print(" t_online  ");
+    Serial.print((60 * T_STATUS) - (now()  - t_online));
+    Serial.print("(s) ");
 
     snprintf(line, sizeof(line), "");
     Serial.println();
@@ -722,18 +670,9 @@ void loop()
 
   }
 
-
-
-
-
-
   digitalWrite(LED_BUILTIN,toggle);
   digitalWrite(EventPin,eventtoggle);
   digitalWrite(StatusPin,statustoggle);
-
-
-
-
 
   /* Sesim event detect and check every 1 TASD secs after first detection*/
 
@@ -742,7 +681,7 @@ void loop()
   if ( (IQR > IQRref && CAV > CAVref)) {
     //if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
     //  if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
-    if ((IQR > IQRref && CAV > CAVref)) trigger = 3;
+    if ((IQR > IQRref && CAV > CAVref)) trigger = 2;
     // if (RSL >= RSLref)  trigger = 1;
 
     t_eventled = now();
@@ -782,6 +721,7 @@ void loop()
         Serial.print("Server not found. Cannot send event");
       }
 
+
       Serial.println();
     }
 
@@ -793,7 +733,7 @@ void loop()
     t_offsetlap = now();
     if (!EVENT) {
       if(FILTER == false)
-      offset(N_OFFSET);
+        offset(N_OFFSET);
       REFERENCE = true;
       DATASEND = false;
       MCHECK = false;
@@ -803,7 +743,7 @@ void loop()
   }
 
   /* Status send*/
-  if ((now() - t_online) >= (SECS_PER_HOUR * T_STATUS)) {
+  if ((now() - t_online) >= (60 * T_STATUS)) {
     t_online = now();
     sendStatus(1);
     REPORT = true;
@@ -823,102 +763,43 @@ void loop()
 }
 
 /* Read values from accelerometer and store it in the array */
-int accSampling2() {
-  int _x , _y, _z;
-  int start = millis();
-
-  switch (acc_id) {
-    case LSMACC:
-    {
-      compass.read();
-      _x = 0.5 * (compass.a.x / 16 - offset_x) + 0.5 * old_x;
-      _y = 0.5 * (compass.a.y / 16 - offset_y) + 0.5 * old_y;
-      _z = 0.5 * (compass.a.z / 16 - offset_z) + 0.5 * old_z;
-    }
-    break;
-    case MMAACC:
-    {
-      accel.readRaw(); // mma
-      _x = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
-      _y = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
-      _z = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
-
-    }
-    break;
-    case ADXLACC:
-    {
-      sca = accelerometer.readmg();
-      _x = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
-      _y = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
-      _z = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
-
-    }
-    break;
-    default:
-    {
-      Serial.println("MATRIX ERROR");
-    }
-    break;
-  }
-
-  if(X.size() == SAMPLES){
-    X.pop_back();
-    Y.pop_back();
-    Z.pop_back();
-    XYZ.pop_back();
-  }
-
-  X.insert(X.begin(),_x);
-  Y.insert(Y.begin(),_y);
-  Z.insert(Z.begin(),_z);
-
-  XYZ.insert(XYZ.begin(),sqrt(_x*_x + _y*_y + _z*_z) * 100.0);
-
-  old_x = _x;
-  old_y = _y;
-  old_z = _z;
-
-  return (millis()-start);
-
-}
-
-/* Read values from accelerometer and store it in the array */
-int accSampling3() {
+int accSampling() {
   int _x , _y, _z;
   int start;
 
   switch (acc_id) {
     case LSMACC:
-    {
-      compass.read();
-      filterOneHighpassX.input( compass.a.x  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
-      filterOneHighpassY.input( compass.a.y  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
-      filterOneHighpassZ.input( compass.a.z  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
-    }
-    break;
+      {
+        compass.read();
+        filterOneHighpassX.input( compass.a.x  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+        filterOneHighpassY.input( compass.a.y  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+        filterOneHighpassZ.input( compass.a.z  / 16 ); // update the one pole lowpass filter, and statistics pmcFilter
+      }
+      break;
     case MMAACC:
-    {
-      accel.readRaw(); // mma
-      filterOneHighpassX.input( accel.x ); // update the one pole lowpass filter, and statistics pmcFilter
-      filterOneHighpassY.input( accel.y ); // update the one pole lowpass filter, and statistics pmcFilter
-      filterOneHighpassZ.input( accel.z ); // update the one pole lowpass filter, and statistics pmcFilter
+      {
+        accel.readRaw(); // mma
+        filterOneHighpassX.input( accel.x ); // update the one pole lowpass filter, and statistics pmcFilter
+        filterOneHighpassY.input( accel.y ); // update the one pole lowpass filter, and statistics pmcFilter
+        filterOneHighpassZ.input( accel.z ); // update the one pole lowpass filter, and statistics pmcFilter
 
-    }
-    break;
+      }
+      break;
     case ADXLACC:
-    {
-      sca = accelerometer.readmg();
-      filterOneHighpassX.input( sca.XAxis ); // update the one pole lowpass filter, and statistics pmcFilter
-      filterOneHighpassY.input( sca.YAxis ); // update the one pole lowpass filter, and statistics pmcFilter
-      filterOneHighpassZ.input( sca.ZAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+      {
+        // sca = accelerometer.readmg();
+        sca = accelerometer.readRaw();
+        filterOneHighpassX.input( sca.XAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+        filterOneHighpassY.input( sca.YAxis ); // update the one pole lowpass filter, and statistics pmcFilter
+        filterOneHighpassZ.input( sca.ZAxis ); // update the one pole lowpass filter, and statistics pmcFilter
 
-    }
-    break;
+      }
+      break;
     default:
-    {
-      Serial.println("MATRIX ERROR");
-    }
-    break;
+      {
+        Serial.println("MATRIX ERROR");
+      }
+      break;
   }
 
   _x = 0.5 * (filterOneHighpassX.output()) + 0.5 * old_x;
@@ -949,8 +830,8 @@ int accSampling3() {
 }
 
 /* Calcs CAV , RSL , IQR and ZC parameters and returns time
-of the operation in milliseconds */
-time_t calcParam2(int _sample) {
+   of the operation in milliseconds */
+time_t calcParam(int _sample) {
   long sumshort = 0;
   long sumlong = 0;
   float cavlong = 0;
@@ -1024,31 +905,31 @@ time_t calcParam2(int _sample) {
       /* ZC */
       if(jj>=1){
         if (X[jj - 1] < 0)
-        xprevious = false;
+          xprevious = false;
         if (X[jj] < 0 )
-        xcurrent = false;
+          xcurrent = false;
         if (Y[jj] < 0 )
-        ycurrent = false;
+          ycurrent = false;
         if (Z[jj] < 0 )
-        zcurrent = false;
+          zcurrent = false;
         if (Z[jj - 1] < 0)
-        zprevious = false;
+          zprevious = false;
         if (Y[jj - 1] < 0)
-        yprevious = false;
+          yprevious = false;
 
 
         if (X[jj] > 0 )
-        xcurrent = true;
+          xcurrent = true;
         if (X[jj - 1] > 0)
-        xprevious = true;
+          xprevious = true;
         if (Y[jj] > 0 )
-        ycurrent = true;
+          ycurrent = true;
         if (Y[jj - 1] > 0)
-        yprevious = true;
+          yprevious = true;
         if (Z[jj] > 0 )
-        zcurrent = true;
+          zcurrent = true;
         if (Z[jj - 1] > 0)
-        zprevious = true;
+          zprevious = true;
 
 
 
@@ -1074,9 +955,9 @@ time_t calcParam2(int _sample) {
         }
       }
       /*
-      snprintf(line, sizeof(line), "% 3d % 2d % 2d % 2d % 4d ", sample, X[jj],Y[jj], Z[jj], XYZ[jj] );
-      Serial.println(line);
-      */
+         snprintf(line, sizeof(line), "% 3d % 2d % 2d % 2d % 4d ", sample, X[jj],Y[jj], Z[jj], XYZ[jj] );
+         Serial.println(line);
+       */
     }
 
 
@@ -1088,282 +969,38 @@ time_t calcParam2(int _sample) {
 
     std::sort (XYZ_temp.begin(), XYZ_temp.end(), myfunction);
     /*
-    Serial.println();
-    Serial.print("XYZtemp");
-    for(int _i0 = 0; _i0<X.size(); _i0++){
-    Serial.print(" ");
-    Serial.print(XYZ_temp[_i0]);
+       Serial.println();
+       Serial.print("XYZtemp");
+       for(int _i0 = 0; _i0<X.size(); _i0++){
+       Serial.print(" ");
+       Serial.print(XYZ_temp[_i0]);
+       }
+       Serial.println();
+       Serial.print("XYZ");
+       for(int _i0 = 0; _i0<X.size(); _i0++){
+       Serial.print(" ");
+       Serial.print(XYZ[_i0]);
+       }
+       Serial.println();
+       Serial.print("temp");
+       for(int _i0 = 0; _i0<X.size(); _i0++){
+       Serial.print(" ");
+       Serial.print(temp[_i0]);
+       }
+       Serial.println();
+     */
+    //  IQR = (XYZ_temp[149]- XYZ_temp[49]);
+    IQR = (XYZ_temp[SAMPLES / 4 * 3 - 1] - XYZ_temp[SAMPLES / 4 - 1]);
   }
-  Serial.println();
-  Serial.print("XYZ");
-  for(int _i0 = 0; _i0<X.size(); _i0++){
-  Serial.print(" ");
-  Serial.print(XYZ[_i0]);
-}
-Serial.println();
-Serial.print("temp");
-for(int _i0 = 0; _i0<X.size(); _i0++){
-Serial.print(" ");
-Serial.print(temp[_i0]);
-}
-Serial.println();
-*/
-//  IQR = (XYZ_temp[149]- XYZ_temp[49]);
-IQR = (XYZ_temp[SAMPLES / 4 * 3 - 1] - XYZ_temp[SAMPLES / 4 - 1]);
+
+  return (millis() - start);
 }
 
-return (millis() - start);
-}
-
-
-
-/* sampling every INTERVALO and SAMPLES times */
-int accSampling(int _sample) {
-
-  /* read values at sampling rate */
-  if (millis() - tiempo >= INTERVALO && _sample < SAMPLES) {
-    tiempo = millis();
-    digitalClockDisplay();
-
-
-    switch (acc_id) {
-      case LSMACC:
-      {
-        compass.read();
-        acc_x[_sample] = 0.5 * (compass.a.x / 16 - offset_x) + 0.5 * old_x;
-        acc_y[_sample] = 0.5 * (compass.a.y / 16 - offset_y) + 0.5 * old_y;
-        acc_z[_sample] = 0.5 * (compass.a.z / 16 - offset_z) + 0.5 * old_z;
-      }
-      break;
-      case MMAACC:
-      {
-        accel.readRaw(); // mma
-        acc_x[sample] = 0.5 * (accel.x - offset_x) + 0.5 * old_x;
-        acc_y[sample] = 0.5 * (accel.y - offset_y) + 0.5 * old_y;
-        acc_z[sample] = 0.5 * (accel.z - offset_z) + 0.5 * old_z;
-
-      }
-      break;
-      case ADXLACC:
-      {
-        sca = accelerometer.readmg();
-        acc_x[sample] = 0.5 * (sca.XAxis - offset_x) + 0.5 * old_x;
-        acc_y[sample] = 0.5 * (sca.YAxis - offset_y) + 0.5 * old_y;
-        acc_z[sample] = 0.5 * (sca.ZAxis - offset_z) + 0.5 * old_z;
-
-      }
-      break;
-      default:
-      {
-        Serial.println("MATRIX ERROR");
-      }
-      break;
-    }
-
-    old_x = acc_x[_sample];
-    old_y = acc_y[_sample];
-    old_z = acc_z[_sample];
-
-    float aax = acc_x[_sample] * acc_x[_sample];
-    float aay = acc_y[_sample] * acc_y[_sample];
-    float aaz = acc_z[_sample] * acc_z[_sample];
-
-    AccNetnow[_sample] = sqrt(aax + aay + aaz) * 100.0; // net aceleration with 2 decimals integer
-    char line[30];
-    snprintf(line, sizeof(line), " % 3d % 2d % 2d % 2d % 4d  ", sample, acc_x[_sample], acc_y[_sample], acc_z[_sample], AccNetnow[_sample] );
-    Serial.print(line);
-    return 0;
-  }
-  return 1;
-}
-
-
-/* Calcs CAV , RSL , IQR and ZC parameters and returns time
-of the operation in milliseconds */
-time_t calcParam(int _sample) {
-  long sumshort = 0;
-  long sumlong = 0;
-  float cavlong = 0;
-  float cavshort = 0;
-  float _smpl = 25.0;
-  bool xcurrent;
-  bool xprevious;
-  bool ycurrent;
-  bool yprevious;
-  bool zcurrent;
-  bool zprevious;
-  short xzcr = 0;
-  short yzcr = 0;
-  short zzcr = 0;
-  long temp[SAMPLES];
-  long temp1[SAMPLES];
-  time_t startcalc;
-  short acc_xabs;
-  short acc_yabs;
-  short acc_zabs;
-  short kkkk;
-  short kkk2 = 0;
-
-
-
-  startcalc = millis();
-  acc_xabs = abs(acc_x[0]);
-  acc_yabs = abs(acc_y[0]);
-  acc_zabs = abs(acc_z[0]);
-
-  /* first values for max and min comparison */
-  acc_xMax = acc_xabs;
-  acc_yMax = acc_yabs;
-  acc_zMax = acc_zabs;
-  ACNmax = AccNetnow[0];
-
-  /* Sampling window analysis */
-  for (int jj = 1; jj < SAMPLES; jj++)
-  {
-
-    /* Max and min comparison */
-    acc_xabs = abs(acc_x[jj]);
-    acc_yabs = abs(acc_y[jj]);
-    acc_zabs = abs(acc_z[jj]);
-
-    if (AccNetnow[jj]  > ACNmax) {
-      ACNmax = AccNetnow[jj];
-      mag_t = jj;
-      amaxm = (millis() - ntpmicro) % 1000;
-    }
-    if (AccNetnow[jj] <= ACNmin) {
-      ACNmin = AccNetnow[jj];
-    }
-    if ( acc_xabs > acc_xMax) {
-      acc_xMax =  acc_xabs;
-    }
-    if (acc_yabs > acc_yMax) {
-      acc_yMax = acc_yabs;
-    }
-    if (acc_zabs > acc_zMax) {
-      acc_zMax = acc_zabs;
-    }
-
-    /* CAV arrays */
-    temp[jj - 1] = AccNetnow[jj - 1];
-    temp1[jj - 1] = AccNetnow[jj - 1];
-
-
-    sumlong += AccNetnow[jj - 1];
-    kkkk = _sample - jj + 1;
-    if (kkkk <= 0) {
-      kkkk = (SAMPLES) - (jj - _sample);
-    }
-
-    if (jj <= _smpl) {
-      sumshort += AccNetnow[kkkk];
-    }
-
-
-    if (acc_x[jj - 1] < 0)
-    xprevious = false;
-    if (acc_x[jj] < 0 )
-    xcurrent = false;
-    if (acc_y[jj] < 0 )
-    ycurrent = false;
-    if (acc_z[jj] < 0 )
-    zcurrent = false;
-    if (acc_z[jj - 1] < 0)
-    zprevious = false;
-    if (acc_y[jj - 1] < 0)
-    yprevious = false;
-
-
-    if (acc_x[jj] > 0 )
-    xcurrent = true;
-    if (acc_x[jj - 1] > 0)
-    xprevious = true;
-    if (acc_y[jj] > 0 )
-    ycurrent = true;
-    if (acc_y[jj - 1] > 0)
-    yprevious = true;
-    if (acc_z[jj] > 0 )
-    zcurrent = true;
-    if (acc_z[jj - 1] > 0)
-    zprevious = true;
-
-
-
-    // if the sign is different
-    if ((xcurrent != xprevious) && acc_x[jj] != 0)
-    {
-      // add one to the zero crossing rate
-      xzcr = xzcr + 1;
-
-    }
-    if ((ycurrent != yprevious) && acc_y[jj] != 0)
-    {
-      // add one to the zero crossing rate
-      yzcr = yzcr + 1;
-
-    }
-    if ((zcurrent != zprevious) && acc_z[jj] != 0)
-    {
-      // add one to the zero crossing rate
-      zzcr = zzcr + 1;
-
-    }
-  }
-  cavlong = (sumlong / SAMPLES) ;
-  cavshort = (sumshort / _smpl) ;
-  CAV = cavlong;
-  ZC = (xzcr + yzcr + zzcr) / (3 * 2);
-  RSL = int((cavshort / cavlong) * 100.0); //
-  //  sortArray(temp, SAMPLES);
-  std::sort(temp1, temp1 + SAMPLES);
-  /*
-  Serial.println();
-  Serial.print("temp");
-  for(int _i0 = 0; _i0<SAMPLES; _i0++){
-  Serial.print(" ");
-  Serial.print(temp[_i0]);
-}
-Serial.println();
-Serial.print("temp1");
-for(int _i0 = 0; _i0<SAMPLES; _i0++){
-Serial.print(" ");
-Serial.print(temp[_i0]);
-}
-Serial.println();
-Serial.print("ACC");
-
-for(int _i0 = 0; _i0<SAMPLES; _i0++){
-Serial.print(" ");
-Serial.print(AccNetnow[_i0]);
-}
-
-Serial.println();
-*/
-IQR = (temp1[151] - temp1[51]);
-//IQR = (temp[SAMPLES / 4 * 3 - 1] - temp[SAMPLES / 4 - 1]);
-char line[160];
-snprintf(line, sizeof(line),
-" % 1lu[ms] % 2d % 2d % 2d % 4d " " % 3d % 4d % 4d % 4d % 3d % 4d % 4d % 4d ",
-(millis() - startcalc), acc_xMax, acc_yMax, acc_zMax, ACNmax, ZC, IQR, CAV, RSL, ZCref, IQRref, CAVref, RSLref);
-Serial.print(line);
-return (millis() - startcalc);
-}
-
-/* get sign of number */
-byte getSign(short data)
-{
-  if (data > 0)   /* positif data */
-  return (1);
-  if (data < 0)         /* negatif data */
-  return (0);
-  else
-  return (2); /*zero data */
-}
 
 /*
-Calc references with max and min values of the parameteres
-return 1 if ok and 0 if still calculating
-*/
+   Calc references with max and min values of the parameteres
+   return 1 if ok and 0 if still calculating
+ */
 
 int CalcRef(int _i, bool _iscalc, int _samples) {
 
@@ -1432,7 +1069,7 @@ int CalcRef(int _i, bool _iscalc, int _samples) {
 
 
       snprintf(line, sizeof(line), " %d %d %d %d %d %d %d %d %d %d %d %d",
-      ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, RSLmax, RSLmin, ZCref, IQRref, CAVref, RSLref);
+          ZCmax, ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, RSLmax, RSLmin, ZCref, IQRref, CAVref, RSLref);
       Serial.print(line);
       return 0; // still calculates until samples are done
     }
@@ -1493,34 +1130,34 @@ void offset(int samples) {
       tiempo = millis();
       switch (acc_id) {
         case LSMACC:
-        {
-          compass.read();
-          offset_x += compass.a.x / 16;
-          offset_y += compass.a.y / 16;
-          offset_z += compass.a.z / 16;
-        }
-        break;
+          {
+            compass.read();
+            offset_x += compass.a.x / 16;
+            offset_y += compass.a.y / 16;
+            offset_z += compass.a.z / 16;
+          }
+          break;
         case MMAACC:
-        {
-          accel.readRaw();
-          offset_x += accel.x;
-          offset_y += accel.y;
-          offset_z += accel.z;
-        }
-        break;
+          {
+            accel.readRaw();
+            offset_x += accel.x;
+            offset_y += accel.y;
+            offset_z += accel.z;
+          }
+          break;
         case ADXLACC:
-        {
-          sca = accelerometer.readmg();
-          offset_x += sca.XAxis;
-          offset_y += sca.YAxis;
-          offset_z += sca.ZAxis;
-        }
-        break;
+          {
+            sca = accelerometer.readmg();
+            offset_x += sca.XAxis;
+            offset_y += sca.YAxis;
+            offset_z += sca.ZAxis;
+          }
+          break;
         default:
-        {
-          Serial.println("MATRIX ERROR");
-        }
-        break;
+          {
+            Serial.println("MATRIX ERROR");
+          }
+          break;
       }
       j++;
     }
@@ -1544,10 +1181,10 @@ int sendPost(time_t _time) {
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
     char line[160];
     snprintf(line, sizeof(line), "%s;%lu;%lu;%d;%lu;%d;%d;%d;%d;%d;%d;%s;%s",
-    ID, _time, (millis() - ntpmicro) % 1000, ACNmax, trigger, ZCref, IQRref, CAVref,
-    ZC, IQR, CAV, latitude, longitude);
+        ID, _time, (millis() - ntpmicro) % 1000, ACNmax, trigger, ZCref, IQRref, CAVref,
+        ZC, IQR, CAV, latitude, longitude);
     //  Serial.print("Event ");
-    //  Serial.println(line);
+    Serial.println(line);
     int httpCode = http.POST(line);
     String payload = http.getString();
     http.end();
@@ -1565,22 +1202,21 @@ int sendPost(time_t _time) {
 
 int sendStatus(int _status) {
   /*
-  1. Activo/Habilitado
-  2. Activo/Inhibido
-  3 .Activo/error de parametro
-  4 ....
-  5  ....
-  4 y 5 por definir
-  */
+     1. Activo/Habilitado
+     2. Activo/Inhibido
+     3 .Activo/error de parametro
+     4 ....
+     5  ....
+     4 y 5 por definir
+   */
   WiFiClient client; // Use WiFiClient class to create TCP connections
   HTTPClient http;
   if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
     http.begin("http://prosismic.zeke.cl/registrarEstado"); //HTTP
     http.addHeader("Content-Type", "text/plain"); // we will just send a simple string in the body.
 
-    char line[160];
-    snprintf(line, sizeof(line), "%s;%lu;%d"
-    ,ID, now(),_status);
+    char line[70];
+    snprintf(line, sizeof(line), "%s;%lu;%d" ,ID, now(),_status);
     //Serial.print("Event ");
     //Serial.println(line);
     int httpCode = http.POST(line);
@@ -1590,8 +1226,8 @@ int sendStatus(int _status) {
       return 0;
     }
     else {
-      //  Serial.print("   payload  ");
-      //    Serial.print(payload);    //Print request response payload
+        Serial.print("   payload  ");
+        Serial.print(payload);    //Print request response payload
       return 1;
     }
   } else {
@@ -1599,35 +1235,6 @@ int sendStatus(int _status) {
   }
 }
 
-int sendStatusPost(time_t _time) {
-
-  WiFiClient client; // Use WiFiClient class to create TCP connections
-  HTTPClient http;
-  if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
-    http.begin(UBIDIR); //HTTP
-    http.addHeader("Content-Type", "application/json"); // we will just send a simple string in the body.
-
-    char line[160];
-    snprintf(line, sizeof(line), "{\"value\":%d, \"context\":{\"lat\":%s, \"lng\":%s}}"
-    , RSL, latitude, longitude);
-    //Serial.print("Event ");
-    //Serial.println(line);
-    int httpCode = http.POST(line);
-    String payload = http.getString();
-    http.end();
-    if (payload.equals("1\n")) {
-      return 0;
-    }
-    else {
-      //    Serial.print("   payload  ");
-      //    Serial.print(payload);    //Print request response payload
-      return 1;
-    }
-  } else {
-
-    return 1;
-  }
-}
 
 void print_mag(int _sample) {
   Serial.print(AccNetnow[_sample]);
@@ -1655,7 +1262,7 @@ void printDigits(int digits)
   // utility for digital clock display: prints preceding colon and leading 0
   Serial.print(":");
   if (digits < 10)
-  Serial.print('0');
+    Serial.print('0');
   Serial.print(digits);
 }
 void printmillisntp(time_t _millis) {
@@ -1677,40 +1284,40 @@ time_t getNtpTime()
   do {
     switch (server) {
       case 1:
-      {
-        strcpy(ntpServerName, "us.pool.ntp.org");
-        //    Serial.println("us.pool.ntp.org");
-        server = 2;
-      }
-      break;
+        {
+          strcpy(ntpServerName, "us.pool.ntp.org");
+          //    Serial.println("us.pool.ntp.org");
+          server = 2;
+        }
+        break;
       case 2:
-      {
-        strcpy(ntpServerName, "time-a.timefreq.bldrdoc.gov");
-        //  Serial.println("time-a.timefreq.bldrdoc.gov");
-        server = 3;
-      }
-      break;
+        {
+          strcpy(ntpServerName, "time-a.timefreq.bldrdoc.gov");
+          //  Serial.println("time-a.timefreq.bldrdoc.gov");
+          server = 3;
+        }
+        break;
       case 3:
-      {
-        strcpy(ntpServerName, "time-b.timefreq.bldrdoc.gov");
-        //  Serial.println("time-b.timefreq.bldrdoc.gov");
-        server = 4;
-      }
-      break;
+        {
+          strcpy(ntpServerName, "time-b.timefreq.bldrdoc.gov");
+          //  Serial.println("time-b.timefreq.bldrdoc.gov");
+          server = 4;
+        }
+        break;
       case 4:
-      {
-        strcpy(ntpServerName, "time-c.timefreq.bldrdoc.gov");
-        //  Serial.println("time-c.timefreq.bldrdoc.gov");
-        server = 5;
-      }
-      break;
+        {
+          strcpy(ntpServerName, "time-c.timefreq.bldrdoc.gov");
+          //  Serial.println("time-c.timefreq.bldrdoc.gov");
+          server = 5;
+        }
+        break;
       default:
-      {
-        strcpy(ntpServerName, "time.nist.gov");
-        //  Serial.println("time.nist.gov");
-        server = 0;
-      }
-      break;
+        {
+          strcpy(ntpServerName, "time.nist.gov");
+          //  Serial.println("time.nist.gov");
+          server = 0;
+        }
+        break;
     }
 
 
