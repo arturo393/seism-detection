@@ -212,7 +212,7 @@ unsigned short ce_event;    //  cuentas en estado de detección
 // Definiciones de los pines
 int EventPin = D5;   // wifi status LED
 int StatusPin = D4;  // accelerometer data readings LED
-int ProblemPin = D3;
+int ServerPin = D3;
 
 
 // String para guardar la georeferencia
@@ -244,7 +244,7 @@ void setup() {
   // Configuración inicial
   pinMode(EventPin, OUTPUT);
   pinMode(StatusPin, OUTPUT);
-  pinMode(ProblemPin,OUTPUT);
+  pinMode(ServerPin,OUTPUT);
   // Subscribe to the integration response event
   //Particle.subscribe("hook-response/Sismo", myHandler);
   //Particle.subscribe("particle/device/name", handler);
@@ -354,7 +354,7 @@ void loop() {
         t_dmuestreo, X[0], Y[0], Z[0], XYZ[0]);
     Serial.print(line);
     Serial.print(" ");
-
+    
     t_dparam = calcParam(c_muestra);
 
     snprintf(line, sizeof(line), " %hd[ms] %hd %hd %hd %ld", t_dparam, acc_xMax,
@@ -371,31 +371,77 @@ void loop() {
     Serial.print(" ");
 
 
+    Serial.print(" t_online  ");
+    Serial.print((OnlineTime) - (Time.now()  - t_online));
+    Serial.print("(s) ");
+
+  // Detección de sismo según los parametros calculados y las referencias
+   
+  trigger = 0;
+  // if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
+  if ((IQR > IQRref && CAV > CAVref)) {
+    // if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
+    //  if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
+    if ((IQR > IQRref && CAV > CAVref)) trigger = 2;
+    // if (RSL >= RSLref)  trigger = 1;
+
+
+    t_eventoled = Time.now();
+
+    if (DATASEND) {
+      DATASEND = false;
+
+      ce_mcheck++;
+
+      if (MCHECK == false) {
+        tc_mcheck = 0;
+        MCHECK = true;
+      }
+
+      ce_dpcheck++;
+      if (DPCHECK == false) {
+        tc_dpcheck = 0;
+        tc_temp1 = 0;
+        tc_temp2 = 0;
+        DPCHECK = true;
+      }
+
+      eventtoggle = true;
+      if (postRequestv2(Time.now()) == 1) {
+        sendParticle();
+        EVENT = true;
+        eventtoggle = false;
+
+      } else {
+        CSERVER = false;
+        MCHECK = false;
+        DPCHECK = false;
+        Serial.print("No se encontró el servidor");
+      }
+
+
+    }
+
+
+  }
+
+
     antimovimiento();
     antidesplazamiento();
     control_de_eventos_consecutivos();
     evento_sin_conexion();
     reinicio_de_variables();
 
-    Serial.print(" t_online  ");
-    Serial.print((OnlineTime) - (Time.now()  - t_online));
-    Serial.print("(s) ");
-    //Serial.print(" lat: ");
-    //Serial.print(latitude);
-    //Serial.print(" lon: ");
-    //Serial.print(longitude);
-    //Serial.print(" ");
-    //Serial.print(ID);
-
     Serial.println();
-
 
     c_muestra++;  // window sample counter
     tc_referencia++;
 
-
     // final del muestreo
   }
+
+
+
 
   // sincronización del tiempo una vez al día
   if (millis() - lastSync > ONE_DAY_MILLIS) {
@@ -433,8 +479,25 @@ void loop() {
       String(-72).toCharArray(longitude, 32);
     }
 
-
   }
+
+  // mantiene la conexión con el servidor
+
+    if(client.connected() == false){
+      digitalWrite(ServerPin,HIGH);
+      client.stop();
+      client.connect("prosismic.zeke.cl",80);
+      Serial.println(" Connected to Prosismc ");
+
+    }
+    else {
+      while (client.available()) {
+        char c = client.read();
+       // Serial.write(c);
+      }
+     digitalWrite(ServerPin,LOW);
+    }
+
 
   led_display();
 
@@ -442,56 +505,6 @@ void loop() {
   digitalWrite(LED_BUILTIN,toggle);
   digitalWrite(EventPin,eventtoggle);
   digitalWrite(StatusPin,statustoggle);
-
-  // Detección de sismo según los parametros calculados y las referencias
-  trigger = 0;
-  // if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
-  if ((IQR > IQRref && CAV > CAVref)) {
-    // if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref)) {
-    //  if ((IQR > IQRref && ZC < ZCref && CAV > CAVref)) trigger = 2;
-    if ((IQR > IQRref && CAV > CAVref)) trigger = 2;
-    // if (RSL >= RSLref)  trigger = 1;
-
-
-    t_eventoled = Time.now();
-
-    if (DATASEND) {
-      DATASEND = false;
-
-      ce_mcheck++;
-
-      if (MCHECK == false) {
-        tc_mcheck = 0;
-        MCHECK = true;
-      }
-
-      ce_dpcheck++;
-      if (DPCHECK == false) {
-        tc_dpcheck = 0;
-        tc_temp1 = 0;
-        tc_temp2 = 0;
-        DPCHECK = true;
-      }
-
-      eventtoggle = true;
-      if (postRequestv2(Time.now()) == 1) {
-        sendParticle();
-        EVENT = true;
-        eventtoggle = false;
-        //   tc_reset = Time.now();
-
-      } else {
-        CSERVER = false;
-        MCHECK = false;
-        DPCHECK = false;
-        Serial.print("No se encontró el servidor");
-      }
-
-
-    }
-
-
-  }
 
 
   if ((Time.now() - tc_reset) >= (RestartTime)) {
@@ -544,7 +557,7 @@ int sendStatus(int _status) {
   request.path = "/registrarEstado";
   request.body = String(line);
   http.post(request, response, headers);
- return 0;
+  return 0;
 }
 
 int led_display(){
@@ -637,15 +650,6 @@ int reinicio_de_variables() {
     ce_mcheck = 0;
 
     client.stop();
-    CONECTADO = client.connect("prosismic.zeke.cl",80);
-
-    if(CONECTADO){
-      Serial.print(" Connected to Prosismc");
-    }
-    else{
-      client.stop();
-      Serial.print(" Cannot Connect to Prosismic ");
-    }
     return 1;
   }
 
@@ -899,35 +903,22 @@ int postRequestv2(time_t _time) {
   // Request path and body can be set at runtime or at setup.
   char line[100];
 
-  if (CONECTADO) {
+  if (client.connected()) {
 
-    snprintf(line, sizeof(line), "%s;%lu;%lu;%ld;%d;%d;%ld;%ld;%d;%ld;%ld;%s;%s",
+    snprintf(line, sizeof(line), "%s;%ld;%ld;%ld;%d;%d;%ld;%ld;%d;%ld;%ld;%s;%s",
         id, _time, (millis() - t_millis) % 1000, ACNmax, trigger,
         ZCref, IQRref, CAVref, ZC, IQR, CAV, latitude, longitude);
 
     time_t _startcalc = millis();
 
-    client.println("POST /registrarEvento HTTP/1.0");
-    client.println("Connection: close");
-    client.println("HOST: prosismic.zeke.cl");
+    client.print("POST /registrarEvento HTTP/1.1\r\n");
+    client.print("Connection: keep-alive\r\n");
+    client.print("HOST: prosismic.zeke.cl\r\n");
     client.print("Content-Length: ");
-    client.println(sizeof(line));
-    client.println("Content-Type: text/plain");
-    client.println();
-    client.flush();
-    client.println(line);
-
-    Serial.println("POST /registrarEvento HTTP/1.0");
-    Serial.println("Connection: close");
-    Serial.println("HOST: prosismic.zeke.cl");
-    Serial.print("Content-Length: ");
-    Serial.println(sizeof(line));
-    Serial.println("Content-Type: text/plain");
-    Serial.println();
-    Serial.flush();
-    Serial.println(line);
-
-    Serial.print(" ");
+    client.print(strlen(line));
+    client.print("\r\n");
+    client.print("Content-Type: text/plain\r\n\r\n");
+    client.print(line);
     // The library also supports sending a body with your request:
     // request.body = "{\"key\":\"value\"}";
 
@@ -940,7 +931,7 @@ int postRequestv2(time_t _time) {
 
     Serial.print(" t_send ");
     Serial.print(millis()-_startcalc);
-    Serial.println("(ms) ");
+    Serial.print("(ms) ");
 
     return 1;
   }
@@ -1165,13 +1156,11 @@ void printDate() {
 void blinking_delay(int _delay) {
   digitalWrite(StatusPin, HIGH);
   digitalWrite(EventPin, HIGH);
-  digitalWrite(ProblemPin, HIGH);
 
   delay(_delay);
 
   digitalWrite(StatusPin, LOW);
   digitalWrite(EventPin, LOW);
-  digitalWrite(ProblemPin, LOW);
 }
 
 FilterOnePole::FilterOnePole(FILTER_TYPE ft, float fc, float initialValue) {
