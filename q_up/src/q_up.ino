@@ -1,34 +1,23 @@
 /*
  * Project q_up
- * Description: Programa para la detección temprana de sismos
+ * Description: Programa para la detección de sismos a través de la medición de un acelerómetro
+ * y el cácluclo de parámetros.
  * Author: Arturo Veras
  * Date: 31 de octubre del 2017
  */
 
 
-
 // This #include statement was automatically added by the Particle IDE.
-#include <Wire.h>
-#include <LSM6.h>
+#include <Wire.h>                        // Para la comunicación I2C
+#include <LSM6.h>                        // Para la comunicación con el acelerómetro
 #undef min
 #undef max
-#include <algorithm>
+#include <algorithm>                     // Para ordenar el arreglego de datos
+#include <HttpClient.h>                  // Para el envío del estado al servidor prosismic
+#include <google-maps-device-locator.h>  // Para la georeferencia
+#include <vector>                        // Para almacenar la ventana de datos
 
-// This #include statement was automatically added by the Particle IDE.
-
-
-#define LOGGING
-#include <HttpClient.h>
-
-
-// This #include statement was automatically added by the Particle IDE.
-//#include <Adafruit_LSM303_U.h>
-
-// This #include statement was automatically added by the Particle IDE.
-#include <google-maps-device-locator.h>
-
-#include <vector>
-
+// Definiciones ütiles
 #define ONE_DAY_MILLIS (24 * 60 * 60 * 1000)
 #define SEGUNDOS_POR_MINUTO 60
 #define SEGUNDOS_POR_HORA 3600
@@ -160,49 +149,50 @@ FilterOnePole filterOneHighpassZ(
 bool myfunction(long i, long j) { return (i < j); }
 
 // variables para el cálculo de los parámetros
-// Parameter variables
 long ACNmax, ACNmin;                 // Aceleración neta máxima y mínima
-int RSL, RSLref, RSLmin, RSLmax;   // Parametro Mr. P (Razon entre promedios)
+int RSL, RSLref, RSLmin, RSLmax;     // Parametro Mr. P (Razon entre promedios)
 long IQR, IQRref, IQRmin, IQRmax;    // Rango intercuartílico
-int ZC, ZCref, ZCmax, ZCmin;       // tasa de cruces por cero
+int ZC, ZCref, ZCmax, ZCmin;         // tasa de cruces por cero
 long CAV, CAVref, CAVmax, CAVmin;    // Aceleración neta acumulada
 short acc_xMax, acc_yMax, acc_zMax;  // xyz-axis max acceleration
-short t_amax;   // tiempo donde fue la aceleración máxima en [ms]
-int trigger;  // 0:notrigger / 1:RSL / 2:ZIC / 3:avisoreceptor
+short t_amax;                        // tiempo donde fue la aceleración máxima en [ms]
+int trigger;                         // 0:notrigger / 1:RSL / 2:ZIC / 3:avisoreceptor
 
 // variables de tiempo
 time_t t_millis;
 time_t t_muestreo;
 int    t_prevsecond;
 time_t t_eventoled;        
-time_t tc_reset;           //  reinicio a variables iniciales del sistema
+time_t tc_reset     = Time.now();    //  reinicio a variables iniciales del sistema
 time_t t_online;           // contador de tiempo para enviar un estado de conexión
+
 // variables de estado
-bool EVENT;                // event detection on/off
-bool CSERVER;              // estado del servidor
-bool DATASEND;             // envio de datos
-bool MCHECK;               // movimiento
-bool DPCHECK;              // desplazamiento
-bool REFERENCIA_VARIABLE;  // parametros true = variables / false = fijos
-bool REFERENCIA_CALCULO;   // parametros true = se están calculandos / false = no
-bool REINICIO;             // reinicio de variables
-bool CONECTADO;             // conectado al servidor prosismic
-// se calculan
-bool FILTER;               // true = habilitado / false = deshabilidato
-bool toggle = false;       // led funcioamiento normal del sensor    
-bool eventtoggle = false ; // led evento detectado
-bool statustoggle = false; // led estados
+bool EVENT               = false; // event detection on/off
+bool CSERVER             = true;  // estado del servidor
+bool DATASEND            = false; // envio de datos
+bool MCHECK              = false; // movimiento
+bool DPCHECK             = false; // desplazamiento
+bool REFERENCIA_VARIABLE = true;  // parametros true = variables / false = fijos
+bool REFERENCIA_CALCULO  = true;  // parametros true = se están calculandos / false = no
+bool REINICIO            = true;  // reinicio de variables
+bool CONECTADO           = true;  // conectado al servidor prosismic
+
+// cambios de estado del los leds
+bool toggle       = false;  // led funcioamiento normal del sensor    
+bool eventtoggle  = false ; // led evento detectado
+bool statustoggle = false;  // led estados
 
 // contadores de tiempo
-unsigned short tc_mcheck;      // muestras que está en estado de movimiento
-unsigned short tc_dpcheck;     // cuantas que está en estado de desplazamiento
-unsigned short tc_temp1;       // counter temporal for DP event
-unsigned short tc_temp2;       // counter temporal for DP event
-unsigned short tc_cserver;     // muestras que el servidor no responde
-unsigned short tc_dpchecktmp;  // temporal para estado de desplazamiento
-unsigned short tc_referencia;  // muestras para calcular las referencias
-unsigned short tc_geo;         // cuentas en que no se encuentra la georefencia de google maps
-unsigned long lastSync = millis();
+unsigned short tc_mcheck     = 0;      // muestras que está en estado de movimiento
+unsigned short tc_dpcheck    = 0;     // cuantas que está en estado de desplazamiento
+unsigned short tc_temp1      = 0;       // counter temporal for DP event
+unsigned short tc_temp2      = 0;       // counter temporal for DP event
+unsigned short tc_cserver    = 0;     // muestras que el servidor no responde
+unsigned short tc_dpchecktmp = 0;  // temporal para estado de desplazamiento
+unsigned short tc_referencia = 0;  // muestras para calcular las referencias
+unsigned short tc_geo        = 0;         // cuentas en que no se encuentra la georefencia de google maps
+unsigned long lastSync       = millis();
+
 
 // contadores de estado
 unsigned short ce_mcheck;   //  veces que está en movimiento
@@ -210,7 +200,7 @@ unsigned short ce_dpcheck;  //  veces que está en desplazamiento
 unsigned short ce_event;    //  cuentas en estado de detección
 
 // Definiciones de los pines
-int EventPin = D5;   // wifi status LED
+int EventPin  = D5;   // wifi status LED
 int StatusPin = D4;  // accelerometer data readings LED
 int ServerPin = D3;
 
@@ -225,58 +215,64 @@ int t_locationsync = ONE_DAY_MILLIS;
 
 String ID;          // identifiación de cada sensor
 char id[25];
-
 LSM6 imu;          //variable del acelerómetro
 
 // funciones callbacks
-void myHandler(const char* event, const char* data);
 void locationCallback(float lat, float lon, float accuracy);
+
+// funciones disposibles en el Cloud
 int setZC(String _zc);
 int setIQR(String _iqr);
 int setCAV(String _cav);
 int setRSL(String _rsl);
+int setReferencia(String _ref);
 int setRestartTime(String _time);
 int setOnlineTime(String _time);
 
 
 
 void setup() {
-  // Configuración inicial
+  
+  // Configuración los LEDS
   pinMode(EventPin, OUTPUT);
   pinMode(StatusPin, OUTPUT);
   pinMode(ServerPin,OUTPUT);
-  // Subscribe to the integration response event
-  //Particle.subscribe("hook-response/Sismo", myHandler);
-  //Particle.subscribe("particle/device/name", handler);
-  //Particle.publish("particle/device/name");
+
+  // Para leer variablse desde el Cloud
   Particle.variable("ZCref", ZCref);
   Particle.variable("IQRref", IQRref);
   Particle.variable("CAVref", CAVref);
   Particle.variable("RSLref", RSLref);
-  Particle.variable("Trigger", trigger);
+ // Particle.variable("Trigger", trigger);
   Particle.variable("Latitude", latitude);
   Particle.variable("Longitude", longitude);
+
+  // Para ejecutar funciones desde el Cloud
   Particle.function("setZC",setZC);
   Particle.function("setIQR",setIQR);
   Particle.function("setCAV",setCAV);
   Particle.function("setRSL",setRSL);
+  Particle.function("Restartmin",setRestartTime);
+  Particle.function("Onlinemin",setOnlineTime);
+  Particle.function("Referencia",setReferencia);
 
+  // Nombre del dispositivo
   ID = System.deviceID();
   ID.toCharArray(id,ID.length());
+
   Serial.begin(50000);
   Wire.begin();
 
-  blinking_delay(5000);
+  blinking_delay(1000);
 
-  if (!imu.init())
-  {
+  if (!imu.init()){
     Serial.println("Failed to detect and initialize IMU!");
     delay (1000);
   }
   imu.enableDefault();
 
 
-  blinking_delay(5000);
+  blinking_delay(1000);
   locator.withSubscribe(locationCallback).withLocatePeriodic(t_locationsync);
 
   // Valores iniciales
@@ -288,34 +284,17 @@ void setup() {
   old_y = 0;
   old_z = 0;
 
-  /* parameter variables */
-  IQRref = 500;   // [mg] integer
-  CAVref = 1000;  // [mg] integer
-  RSLref = 300;   // percent para medir la ligua
-  ZCref = 22;
+  IQRref =  500;
+  CAVref =  1000;  
+  RSLref =  300;   
+  ZCref  =  22;
 
-  t_muestreo = millis();
+  t_muestreo  = millis();
   t_eventoled = 0;
 
-  EVENT = false;
-  CSERVER = true;
-  DATASEND = false;
-  MCHECK = false;
-  DPCHECK = false;
-  REFERENCIA_VARIABLE = true;
-  REFERENCIA_CALCULO = true;
-  FILTER = true;
-  REINICIO = true;
 
-  tc_mcheck = 0;
-  tc_dpcheck = 0;
-  tc_dpchecktmp = 0;
-  tc_temp1 = 0;
-  tc_temp2 = 0;
-  tc_cserver = 0;
-  tc_referencia = 0;
-  tc_reset = Time.now();  // IMPORTANTE
-  tc_geo = 0;
+
+
 
   ce_mcheck = 0;
   ce_dpcheck = 0;
@@ -430,12 +409,12 @@ void loop() {
     antidesplazamiento();
     control_de_eventos_consecutivos();
     evento_sin_conexion();
-    reinicio_de_variables();
+    reiniciando();
 
     Serial.println();
 
     c_muestra++;  // window sample counter
-    tc_referencia++;
+
 
     // final del muestreo
   }
@@ -491,7 +470,7 @@ void loop() {
 
     }
     else {
-      while (client.available()) {
+      if (client.available()) {
         char c = client.read();
        // Serial.write(c);
       }
@@ -523,8 +502,6 @@ void loop() {
       DATASEND = false;
       MCHECK = false;
       DPCHECK = false;
-      REFERENCIA_VARIABLE = false;
-      REFERENCIA_CALCULO = true;
       REINICIO = true;
     }
   }
@@ -601,33 +578,40 @@ void locationCallback(float lat, float lon, float accuracy) {
 // Se reinician los valores iniciales, se ajusta el offset y se calculan las
 // referencias.
 
-int reinicio_de_variables() {
+bool reiniciando() {
 
   Serial.print(" t_reset ");
   Serial.print((RestartTime) - (Time.now()  - tc_reset));
   Serial.print("(s) ");
+
   if (( REINICIO == true ) && (X.size() >= SAMPLES)) {
-    // En caso de no usar el filtro
-    // if (tc_referencia == 0 && FILTER == false) {
-    //     snprintf(line, sizeof(line), "Offset(x, y, z) = (%d,%d,%d)",
-    //     offset_x, offset_y, offset_z);
-    //  Serial.print(line);
-    //        Serial.print(" ");
-    //}
 
-    // Se toman SAMPLES * PARAMETER_SAMPLES como muestras para calculo de las
-    // referencias
+    if (REFERENCIA_VARIABLE  == true ){ // solo se modifica al inicio
 
-    if (REFERENCIA_VARIABLE &&
-        (CalcRef(tc_referencia, REFERENCIA_CALCULO, SAMPLES * 5) == 0)) {
-      Serial.print("References Calculated");
-      Serial.print(" ");
-      DATASEND = true;
-      REFERENCIA_CALCULO = false;
-      REINICIO = false;
+      if( CalcRef(tc_referencia, SAMPLES * 5) == false ) { // está calculando
+        DATASEND = false;
+        REINICIO = true;
+        tc_referencia++;
+        return true;
+      }
+      else { // terminó el conteo para el calculo de la referencia
+        DATASEND = true;
+        REINICIO = false;
+        tc_referencia = 0;
+        client.stop();
+        tc_dpcheck = 0;
+        tc_mcheck = 0;
+        tc_temp1 = 0;
+        tc_temp2 = 0;
+        tc_mcheck = 0;
+        ce_mcheck = 0;
+        return false;
+      }
+    
     }
 
-    else {
+
+    else { // REFERNCIA_VARIABLE = false
       // usar parametros variables por particle
       Serial.print("Referencia Fija");
       IQRref = 500;   // [mg] integer
@@ -635,184 +619,199 @@ int reinicio_de_variables() {
       RSLref = 300;   // percent para medir la ligua
       ZCref = 22;
       DATASEND = true;
-      REFERENCIA_CALCULO = false;
       REINICIO = false;
-      tc_referencia = 0;
+      client.stop();
       c_muestra = 0;
-      Serial.print(" ");
-    }
-
-    tc_dpcheck = 0;
-    tc_mcheck = 0;
-    tc_temp1 = 0;
-    tc_temp2 = 0;
-    tc_mcheck = 0;
-    ce_mcheck = 0;
-
-    client.stop();
-    return 1;
-  }
-
-  return 0;
-}
-
-// avisa cuando un evento no es notificado al servidor
-int evento_sin_conexion() {
-  if (!CSERVER) {  // wait for server resend
-    Serial.print("Pause event for ");
-    Serial.print(SAMPLES / 2 - tc_cserver);
-    Serial.print(" ce_cserver");
-    Serial.print(" ");
-    tc_cserver++;
-
-    /* check server count complete */
-    if (tc_cserver >= SAMPLES / 2) {
-      tc_cserver = 0;
-      DATASEND = true;
-      CSERVER = true;
-    }
-    return 1;
-  }
-  return 0;
-}
-
-
-
-
-
-// revisa si hay eventos conseuctivos y detiene el envío de eventos en caso
-// afirmativo
-int control_de_eventos_consecutivos() {
-  if (EVENT) {  // pause after eventis detected
-
-    /* check if event count comp	// Initialize sensor
-       LIS3DHConfig config;
-       config.setAccelMode(LIS3DH::RATE_100_HZ);lete */
-    if (ce_event >= SAMPLES / 2) {
-      ce_event = 0;
-      DATASEND = true;
-      EVENT = false;
-    } else {
-      Serial.print("Pause event for ");
-      Serial.print(SAMPLES / 2 - ce_event);
-      Serial.print(" ce_event");
-      Serial.print(" ");
-      ce_event++;
-    }
-    return 1;
-  }
-  return 0;
-}
-
-
-
-
-
-// revisa si hay desplazamiento del sensor
-int antidesplazamiento() {
-  if (DPCHECK == true) {
-    char dpline[100];
-
-    if (tc_dpcheck <= DPTIME) {  // check 6000 count windwow
-      snprintf(dpline, sizeof(dpline),
-          "PDEvent %d/3 in %4d count - ec1 %d ec2 %3d", ce_dpcheck,
-          DPTIME - tc_dpcheck, tc_temp1, tc_temp2);
-      Serial.print(dpline);
-      Serial.print(" ");
-
-      if (ce_dpcheck == 1) {
-        tc_temp1++;
-      }
-
-      if (ce_dpcheck == 2) {
-        if (tc_temp1 >= 300) {
-          tc_temp2++;
-        } else {
-          tc_temp1 = 0;
-          ce_dpcheck = 1;
-        }
-      }
-
-      if (ce_dpcheck == 3) {
-        if (tc_temp2 >= 300) {
-          tc_dpcheck = 0;
-          ce_dpcheck = 0;
-          tc_dpchecktmp = 0;
-          DATASEND = false;
-          EVENT = false;
-          DPCHECK = false;
-          MCHECK = false;
-          Serial.print(" Pause event sending until offset");
-          Serial.print(" ");
-        } else {
-          tc_temp1 = 0;
-          tc_temp2 = 0;
-          ce_dpcheck = 1;
-        }
-      }
-    }
-
-    else {
       tc_dpcheck = 0;
-      ce_dpcheck = 0;
-      tc_dpchecktmp = 0;
-      DPCHECK = false;
-    }
-
-    tc_dpcheck++;
-    return 1;
-  }
-  return 0;
-}
-
-
-
-
-// revisa si hay movimiento duerante muestras
-
-
-int antimovimiento() {
-  char line[150];
-  if (MCHECK == true) {
-    if (tc_mcheck <= MTIME) {  // check 1500 count
-      snprintf(line, sizeof(line), "MEvent %d/5 in %d count", ce_mcheck,
-          (DPTIME - tc_mcheck));
-      Serial.print(line);
-      Serial.print(" ");
-      tc_mcheck++;
-
-      if (ce_mcheck >= 5) {  // are 5 event
-        DATASEND = false;
-        EVENT = false;
-        MCHECK = false;
-        DPCHECK = false;
-        ce_event = 0;  // ready for next eventsamples
-        Serial.print("Pause event sending until offset");
-        Serial.print(" ");
-      }
-    }
-
-    else {
+      tc_mcheck = 0;
+      tc_temp1 = 0;
+      tc_temp2 = 0;
       tc_mcheck = 0;
       ce_mcheck = 0;
-      if (EVENT == false) MCHECK = false;
+      Serial.print(" ");
+      return false;
     }
-    return 1;
-  }
 
-  return 0;
+  }  // fin del calculo de las referencias
+
+return false;
 }
 
-// Calculo de las referencias según los valores maximos y mininmos de las
-// _samples muestras}
+
+  // avisa cuando un evento no es notificado al servidor
+  int evento_sin_conexion() {
+    if (!CSERVER) {  // wait for server resend
+      Serial.print("Pause event for ");
+      Serial.print(SAMPLES / 2 - tc_cserver);
+      Serial.print(" ce_cserver");
+      Serial.print(" ");
+      tc_cserver++;
+
+      /* check server count complete */
+      if (tc_cserver >= SAMPLES / 2) {
+        tc_cserver = 0;
+        DATASEND = true;
+        CSERVER = true;
+      }
+      return 1;
+    }
+    return 0;
+  }
 
 
-int CalcRef(int _i, bool _iscalc, int _samples) {
+
+
+
+  // revisa si hay eventos conseuctivos y detiene el envío de eventos en caso
+  // afirmativo
+  int control_de_eventos_consecutivos() {
+    if (EVENT) {  // pause after eventis detected
+
+      /* check if event count comp	// Initialize sensor
+         LIS3DHConfig config;
+         config.setAccelMode(LIS3DH::RATE_100_HZ);lete */
+      if (ce_event >= SAMPLES / 2) {
+        ce_event = 0;
+        DATASEND = true;
+        EVENT = false;
+      } else {
+        Serial.print("Pause event for ");
+        Serial.print(SAMPLES / 2 - ce_event);
+        Serial.print(" ce_event");
+        Serial.print(" ");
+        ce_event++;
+      }
+      return 1;
+    }
+    return 0;
+  }
+
+
+
+
+
+  // revisa si hay desplazamiento del sensor
+  int antidesplazamiento() {
+    if (DPCHECK == true) {
+      char dpline[100];
+
+      if (tc_dpcheck <= DPTIME) {  // check 6000 count windwow
+        snprintf(dpline, sizeof(dpline),
+            "PDEvent %d/3 in %4d count - ec1 %d ec2 %3d", ce_dpcheck,
+            DPTIME - tc_dpcheck, tc_temp1, tc_temp2);
+        Serial.print(dpline);
+        Serial.print(" ");
+
+        if (ce_dpcheck == 1) {
+          tc_temp1++;
+        }
+
+        if (ce_dpcheck == 2) {
+          if (tc_temp1 >= 300) {
+            tc_temp2++;
+          } else {
+            tc_temp1 = 0;
+            ce_dpcheck = 1;
+          }
+        }
+
+        if (ce_dpcheck == 3) {
+          if (tc_temp2 >= 300) {
+            tc_dpcheck = 0;
+            ce_dpcheck = 0;
+            tc_dpchecktmp = 0;
+            DATASEND = false;
+            EVENT = false;
+            DPCHECK = false;
+            MCHECK = false;
+            Serial.print(" Pause event sending until offset");
+            Serial.print(" ");
+          } else {
+            tc_temp1 = 0;
+            tc_temp2 = 0;
+            ce_dpcheck = 1;
+          }
+        }
+      }
+
+      else {
+        tc_dpcheck = 0;
+        ce_dpcheck = 0;
+        tc_dpchecktmp = 0;
+        DPCHECK = false;
+      }
+
+      tc_dpcheck++;
+      return 1;
+    }
+    return 0;
+  }
+
+
+
+
+  // revisa si hay movimiento duerante muestras
+
+
+  int antimovimiento() {
+    char line[150];
+    if (MCHECK == true) {
+      if (tc_mcheck <= MTIME) {  // check 1500 count
+        snprintf(line, sizeof(line), "MEvent %d/5 in %d count", ce_mcheck,
+            (DPTIME - tc_mcheck));
+        Serial.print(line);
+        Serial.print(" ");
+        tc_mcheck++;
+
+        if (ce_mcheck >= 5) {  // are 5 event
+          DATASEND = false;
+          EVENT = false;
+          MCHECK = false;
+          DPCHECK = false;
+          ce_event = 0;  // ready for next eventsamples
+          Serial.print("Pause event sending until offset");
+          Serial.print(" ");
+        }
+      }
+
+      else {
+        tc_mcheck = 0;
+        ce_mcheck = 0;
+        if (EVENT == false) MCHECK = false;
+      }
+      return 1;
+    }
+
+    return 0;
+  }
+
+  // Calculo de las referencias según los valores maximos y mininmos de las
+  // _samples muestras}
+
+
+bool CalcRef(int _i, int _samples) {
   char line[80];
 
-  if (_i < _samples) {  // use total _samples for calculation
+  if (_i < _samples) {  // numero de muestras para el calculo
 
-    if (_i >= 400) {  // use the samples -1 values to find max and min
+    if (_i < 400) {  // las primeras 400 muestras son de estabilización
+
+      IQRmax = -1;
+      IQRmin = 9999999;
+      ZCmax = -1;
+      ZCmin = 32767;
+      CAVmax = -1;
+      CAVmin = 9999999;
+      RSLmax = -1;
+      RSLmin = 32767;
+
+      Serial.print("Sensor stabilizing for ");
+      Serial.print(_i);
+      Serial.print(" count");
+
+    }
+
+    else {  // las siguientes muestras para buscar el máximo y mínimo
 
       if (IQR > IQRmax) {
         IQRmax = IQR;
@@ -852,30 +851,20 @@ int CalcRef(int _i, bool _iscalc, int _samples) {
       RSLref = maxx(155, (RSLmax - RSLmin) * Factor_RSL);
     }
 
-    else {  // use the first value for max and min
 
-      IQRmax = -1;
-      IQRmin = 9999999;
-      ZCmax = -1;
-      ZCmin = 32767;
-      CAVmax = -1;
-      CAVmin = 9999999;
-      RSLmax = -1;
-      RSLmin = 32767;
-
-      Serial.print("Sensor stabilizing for ");
-      Serial.print(_i);
-      Serial.print(" count");
-    }
-
-    snprintf(line, sizeof(line), " %d %d %ld %ld %ld %ld %d %d %d %ld %ld %d", ZCmax,
-        ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, RSLmax, RSLmin, ZCref,
-        IQRref, CAVref, RSLref);
+    // muestra los valores estabilizados y los máximos y mínimos
+    snprintf(line, sizeof(line), " %d %d %ld %ld %ld %ld %d %d", ZCmax,
+        ZCmin, IQRmax, IQRmin, CAVmax, CAVmin, RSLmax, RSLmin);
     Serial.print(line);
-    return 1;  // sigue calculando
+    return false;  // sigue calculando
   }
+  else { // se terminan las muestras
 
-  return 0;
+    Serial.print("References Calculated");
+    Serial.print(" ");
+
+    return true; // terminó el conteo de las muestras
+  }
 }
 
 const short maxx(const short& a, const short& b) { return (a < b) ? b : a; }
@@ -1411,5 +1400,16 @@ int setRestartTime(String _time){
 }
 int setOnlineTime(String _time){
   OnlineTime = _time.toInt()*SEGUNDOS_POR_MINUTO;
+  return 0;
+}
+
+int setReferencia(String _ref){
+  
+  int var = _ref.toInt();
+  switch(var){
+    case 1: REFERENCIA_VARIABLE = true;
+    case 0: REFERENCIA_VARIABLE = false;
+    default :REFERENCIA_VARIABLE = false;
+  } 
   return 0;
 }
