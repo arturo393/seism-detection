@@ -23,8 +23,8 @@
 #define SEGUNDOS_POR_HORA 3600
 
 
-PRODUCT_ID(00); // replace by your product ID
-PRODUCT_VERSION(1); // increment each time you upload to the console
+PRODUCT_ID(6135); // replace by your product ID
+PRODUCT_VERSION(2); // increment each time you upload to the console
 SYSTEM_THREAD(ENABLED);
 // for filter
 
@@ -160,10 +160,10 @@ int trigger;                         // 0:notrigger / 1:RSL / 2:ZIC / 3:avisorec
 
 // variables de tiempo
 time_t t_millis;
-time_t t_muestreo;
+time_t t_muestreo    = millis();
 int    t_prevsecond;
-time_t t_eventoled;        
-time_t tc_reset     = Time.now();    //  reinicio a variables iniciales del sistema
+time_t t_eventoled   = 0;
+time_t tc_reset      = Time.now();    //  reinicio a variables iniciales del sistema
 time_t t_online;           // contador de tiempo para enviar un estado de conexión
 
 // variables de estado
@@ -172,13 +172,13 @@ bool CSERVER             = true;  // estado del servidor
 bool DATASEND            = false; // envio de datos
 bool MCHECK              = false; // movimiento
 bool DPCHECK             = false; // desplazamiento
-bool REFERENCIA_VARIABLE = true;  // parametros true = variables / false = fijos
+bool REFERENCIA_VARIABLE = false;  // parametros true = variables / false = fijos
 bool REFERENCIA_CALCULO  = true;  // parametros true = se están calculandos / false = no
 bool REINICIO            = true;  // reinicio de variables
 bool CONECTADO           = true;  // conectado al servidor prosismic
 
 // cambios de estado del los leds
-bool toggle       = false;  // led funcioamiento normal del sensor    
+bool toggle       = false;  // led funcioamiento normal del sensor
 bool eventtoggle  = false ; // led evento detectado
 bool statustoggle = false;  // led estados
 
@@ -232,7 +232,7 @@ int setOnlineTime(String _time);
 
 
 void setup() {
-  
+
   // Configuración los LEDS
   pinMode(EventPin, OUTPUT);
   pinMode(StatusPin, OUTPUT);
@@ -273,8 +273,9 @@ void setup() {
 
 
   blinking_delay(1000);
-  locator.withSubscribe(locationCallback).withLocatePeriodic(t_locationsync);
+ // locator.withSubscribe(locationCallback).withLocatePeriodic(t_locationsync);
 
+  locator.withLocateOnce();
   // Valores iniciales
   t_prevsecond = millis();
   t_eventoled = 0;
@@ -285,12 +286,11 @@ void setup() {
   old_z = 0;
 
   IQRref =  500;
-  CAVref =  1000;  
-  RSLref =  300;   
+  CAVref =  1000;
+  RSLref =  300;
   ZCref  =  22;
 
-  t_muestreo  = millis();
-  t_eventoled = 0;
+
 
 
 
@@ -333,7 +333,7 @@ void loop() {
         t_dmuestreo, X[0], Y[0], Z[0], XYZ[0]);
     Serial.print(line);
     Serial.print(" ");
-    
+
     t_dparam = calcParam(c_muestra);
 
     snprintf(line, sizeof(line), " %hd[ms] %hd %hd %hd %ld", t_dparam, acc_xMax,
@@ -355,7 +355,7 @@ void loop() {
     Serial.print("(s) ");
 
   // Detección de sismo según los parametros calculados y las referencias
-   
+
   trigger = 0;
   // if ( (IQR > IQRref && ZC < ZCref && CAV > CAVref) || (RSL >= RSLref) ) {
   if ((IQR > IQRref && CAV > CAVref)) {
@@ -448,15 +448,11 @@ void loop() {
 
 
     // En caso de no encontrar la posición que lo intente cada 4 segundos
-    if(String(latitude).equals(NULL) == true ){
-      locator.publishLocation();
+    if((String(latitude).equals(NULL) == true) && (tc_geo%10 == 0) ){
+      locator.withSubscribe(locationCallback).publishLocation();
       tc_geo++;
     }
 
-    if(tc_geo >= 4){
-      String(-32).toCharArray(latitude, 32);
-      String(-72).toCharArray(longitude, 32);
-    }
 
   }
 
@@ -556,7 +552,7 @@ int led_display(){
         statustoggle = false;
 
 
-      else 
+      else
         statustoggle = true;
 
     }
@@ -607,7 +603,7 @@ bool reiniciando() {
         ce_mcheck = 0;
         return false;
       }
-    
+
     }
 
 
@@ -845,10 +841,10 @@ bool CalcRef(int _i, int _samples) {
       Serial.print(_i);
       Serial.print(" count");
       /* Calculates de references each time for debug */
-      IQRref = maxx(long(300), (IQRmax - IQRmin) * Factor_IQR);
-      CAVref = maxx(long(500), (CAVmax - CAVmin) * Factor_CAV);
-      ZCref = float((ZCmax + ZCmin) / 2) - float((ZCmax - ZCmin) * Factor_ZC);
-      RSLref = maxx(155, (RSLmax - RSLmin) * Factor_RSL);
+	      IQRref = maxx(long(300), (IQRmax - IQRmin) * Factor_IQR);
+	      CAVref = maxx(long(500), (CAVmax - CAVmin) * Factor_CAV);
+	      ZCref = float((ZCmax + ZCmin) / 2) - float((ZCmax - ZCmin) * Factor_ZC);
+	      RSLref = maxx(155, (RSLmax - RSLmin) * Factor_RSL);
     }
 
 
@@ -1404,12 +1400,12 @@ int setOnlineTime(String _time){
 }
 
 int setReferencia(String _ref){
-  
+
   int var = _ref.toInt();
   switch(var){
     case 1: REFERENCIA_VARIABLE = true;
     case 0: REFERENCIA_VARIABLE = false;
     default :REFERENCIA_VARIABLE = false;
-  } 
+  }
   return 0;
 }
