@@ -968,28 +968,6 @@ time_t calcParam(int _sample) {
     RSL = int((cavshort / cavlong) * 100); //
 
     std::sort (XYZ_temp.begin(), XYZ_temp.end(), myfunction);
-    /*
-       Serial.println();
-       Serial.print("XYZtemp");
-       for(int _i0 = 0; _i0<X.size(); _i0++){
-       Serial.print(" ");
-       Serial.print(XYZ_temp[_i0]);
-       }
-       Serial.println();
-       Serial.print("XYZ");
-       for(int _i0 = 0; _i0<X.size(); _i0++){
-       Serial.print(" ");
-       Serial.print(XYZ[_i0]);
-       }
-       Serial.println();
-       Serial.print("temp");
-       for(int _i0 = 0; _i0<X.size(); _i0++){
-       Serial.print(" ");
-       Serial.print(temp[_i0]);
-       }
-       Serial.println();
-     */
-    //  IQR = (XYZ_temp[149]- XYZ_temp[49]);
     IQR = (XYZ_temp[SAMPLES / 4 * 3 - 1] - XYZ_temp[SAMPLES / 4 - 1]);
   }
 
