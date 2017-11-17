@@ -16,7 +16,7 @@
 #include <HttpClient.h>                  // Para el envío del estado al servidor prosismic
 #include <google-maps-device-locator.h>  // Para la georeferencia
 #include <vector>                        // Para almacenar la ventana de datos
-
+#include <Filters.h>
 // Definiciones ütiles
 #define ONE_DAY_MILLIS (24 * 60 * 60 * 1000)
 #define SEGUNDOS_POR_MINUTO 60
@@ -24,7 +24,7 @@
 
 
 PRODUCT_ID(6135); // replace by your product ID
-PRODUCT_VERSION(2); // increment each time you upload to the console
+PRODUCT_VERSION(4); // increment each time you upload to the console
 SYSTEM_THREAD(ENABLED);
 // for filter
 
@@ -41,74 +41,6 @@ http_header_t headers[] = {
 
 http_request_t request;
 http_response_t response;
-
-enum FILTER_TYPE { HIGHPASS, LOWPASS, INTEGRATOR, DIFFERENTIATOR };
-
-// the recursive filter class implements a recursive filter (low / pass /
-// highpass
-// note that this must be updated in a loop, using the most recent acquired
-// values and the time acquired
-//   Y = a0*X + a1*Xm1
-//              + b1*Ylast
-struct FilterOnePole {
-  FILTER_TYPE FT;
-  float TauUS;     // decay constant of the filter, in US
-  float TauSamps;  // tau, measued in samples (this changes, depending on how
-  // long between input()s
-
-  // filter values - these are public, but should not be set externally
-  float Y;      // most recent output value (gets computed on update)
-  float Ylast;  // prevous output value
-
-  float X;  // most recent input value
-
-  // elapsed times are kept in long, and will wrap every
-  // 35 mins, 47 seconds ... however, the wrap does not matter,
-  // because the delta will still be correct (always positive and small)
-  float ElapsedUS;  // time since last update
-  long LastUS;      // last time measured
-
-  FilterOnePole(FILTER_TYPE ft = LOWPASS, float fc = 1.0,
-      float initialValue = 0);
-
-  // sets or resets the parameters and state of the filter
-  void setFilter(FILTER_TYPE ft, float tauS, float initialValue);
-
-  void setFrequency(float newFrequency);
-
-  void setTau(float newTau);
-
-  float input(float inVal);
-
-  float output();
-
-  void print();
-
-  void test();
-
-  void setToNewValue(float newVal);  // resets the filter to a new value
-};
-
-// two pole filter, these are very useful
-struct FilterOnePoleCascade {
-  FilterOnePole Pole1;
-  FilterOnePole Pole2;
-
-  FilterOnePoleCascade(
-      float riseTime = 1.0,
-      float initialValue = 0);  // rise time to step function, 10% to 90%
-
-  // rise time is 10% to 90%, for a step input
-  void setRiseTime(float riseTime);
-
-  void setToNewValue(float newVal);
-
-  float input(float inVal);
-
-  float output();
-
-  void test();
-};
 
 // variables configurables
 const int FrecRPS = 100;  // frecuencia de muestreo en [hz]
@@ -132,19 +64,14 @@ std::vector<short> Y;  // vector de la aceleración en el eje Y
 std::vector<short> Z;  // vector de la aceleración en el eje Z
 std::vector<long> XYZ;
 short old_x, old_y, old_z;  // muestra anterior
-float cutFrequency = 2;     // frecuancia de corte en [hz]
+
 
 
 // Filtros paca da uno de los ejes
-FilterOnePole filterOneHighpassX(
-    HIGHPASS,
-    cutFrequency);  // create a one pole (RC) highpass filter pmcFilter
-FilterOnePole filterOneHighpassY(
-    HIGHPASS,
-    cutFrequency);  // create a one pole (RC) highpass filter pmcFilter
-FilterOnePole filterOneHighpassZ(
-    HIGHPASS,
-    cutFrequency);  // create a one pole (RC) highpass filter pmcFilter
+float cutFrequency = 2;     // frecuancia de corte en [hz]
+FilterOnePole filterOneHighpassX(HIGHPASS,cutFrequency);  // create a one pole (RC) highpass filter pmcFilter
+FilterOnePole filterOneHighpassY(HIGHPASS,cutFrequency);  // create a one pole (RC) highpass filter pmcFilter
+FilterOnePole filterOneHighpassZ(HIGHPASS,cutFrequency);  // create a one pole (RC) highpass filter pmcFilter
 
 bool myfunction(long i, long j) { return (i < j); }
 
@@ -183,14 +110,14 @@ bool eventtoggle  = false ; // led evento detectado
 bool statustoggle = false;  // led estados
 
 // contadores de tiempo
-unsigned short tc_mcheck     = 0;      // muestras que está en estado de movimiento
+unsigned short tc_mcheck     = 0;     // muestras que está en estado de movimiento
 unsigned short tc_dpcheck    = 0;     // cuantas que está en estado de desplazamiento
-unsigned short tc_temp1      = 0;       // counter temporal for DP event
-unsigned short tc_temp2      = 0;       // counter temporal for DP event
+unsigned short tc_temp1      = 0;     // counter temporal for DP event
+unsigned short tc_temp2      = 0;     // counter temporal for DP event
 unsigned short tc_cserver    = 0;     // muestras que el servidor no responde
-unsigned short tc_dpchecktmp = 0;  // temporal para estado de desplazamiento
-unsigned short tc_referencia = 0;  // muestras para calcular las referencias
-unsigned short tc_geo        = 0;         // cuentas en que no se encuentra la georefencia de google maps
+unsigned short tc_dpchecktmp = 0;     // temporal para estado de desplazamiento
+unsigned short tc_referencia = 0;     // muestras para calcular las referencias
+unsigned short tc_geo        = 0;     // cuentas en que no se encuentra la georefencia de google maps
 unsigned long lastSync       = millis();
 
 
@@ -206,8 +133,8 @@ int ServerPin = D3;
 
 
 // String para guardar la georeferencia
-char latitude[32];   // latitude value from host
-char longitude[32];  // longitude value from host
+char latitude[32]="0";   // latitude value from host
+char longitude[32]="0";  // longitude value from host
 
 // integración de google maps con el Cloud de particle
 GoogleMapsDeviceLocator locator;
@@ -229,6 +156,28 @@ int setReferencia(String _ref);
 int setRestartTime(String _time);
 int setOnlineTime(String _time);
 
+
+
+
+bool reiniciando();
+int evento_sin_conexion();
+int control_de_eventos_consecutivos();
+int antidesplazamiento();
+int antimovimiento();
+
+int accSampling();
+bool CalcRef(int _i, int _samples);
+time_t calcParam(int _sample);
+
+int sendParticle();
+int postRequestv2(time_t _time);
+int postRequest(time_t _time);
+int sendStatus(int _status);
+
+void printTime();
+void printDate();
+void blinking_delay(int _delay);
+int led_display();
 
 
 void setup() {
@@ -290,12 +239,6 @@ void setup() {
   RSLref =  300;
   ZCref  =  22;
 
-
-
-
-
-
-
   ce_mcheck = 0;
   ce_dpcheck = 0;
   ce_event = 0;
@@ -329,19 +272,17 @@ void loop() {
 
     t_dmuestreo = accSampling();
 
-    snprintf(line,sizeof(line),"%hdsam %hd[ms] %hd %hd %hd %ld", c_muestra,
-        t_dmuestreo, X[0], Y[0], Z[0], XYZ[0]);
+    snprintf(line,sizeof(line),"%4hdsam %4hd %4hd %4hd %5ld", c_muestra, X[0], Y[0], Z[0], XYZ[0]);
     Serial.print(line);
     Serial.print(" ");
 
     t_dparam = calcParam(c_muestra);
 
-    snprintf(line, sizeof(line), " %hd[ms] %hd %hd %hd %ld", t_dparam, acc_xMax,
-        acc_yMax, acc_zMax, ACNmax);
+    snprintf(line, sizeof(line), " %3hd %3hd %3hd %5ld", acc_xMax,acc_yMax, acc_zMax, ACNmax);
     Serial.print(line);
     Serial.print(" ");
 
-    snprintf(line, sizeof(line), "%d %ld %ld %d", ZC, IQR, CAV, RSL);
+    snprintf(line, sizeof(line), "%3d %5ld %6ld %4d", ZC, IQR, CAV, RSL);
     Serial.print(line);
     Serial.print(" ");
 
@@ -350,9 +291,9 @@ void loop() {
     Serial.print(" ");
 
 
-    Serial.print(" t_online  ");
-    Serial.print((OnlineTime) - (Time.now()  - t_online));
-    Serial.print("(s) ");
+//    Serial.print(" t_online  ");
+//    Serial.print((OnlineTime) - (Time.now()  - t_online));
+//    Serial.print("(s) ");
 
   // Detección de sismo según los parametros calculados y las referencias
 
@@ -404,7 +345,6 @@ void loop() {
 
   }
 
-
     antimovimiento();
     antidesplazamiento();
     control_de_eventos_consecutivos();
@@ -414,7 +354,6 @@ void loop() {
     Serial.println();
 
     c_muestra++;  // window sample counter
-
 
     // final del muestreo
   }
@@ -448,30 +387,34 @@ void loop() {
 
 
     // En caso de no encontrar la posición que lo intente cada 4 segundos
-    if((String(latitude).equals(NULL) == true) && (tc_geo%10 == 0) ){
+    if((String(latitude).equals("0") == true) && (tc_geo == 60) )
       locator.withSubscribe(locationCallback).publishLocation();
-      tc_geo++;
-    }
+    if(tc_geo>60 )   
+      tc_geo =0;  
+
+    tc_geo++;
+
+
 
 
   }
 
   // mantiene la conexión con el servidor
 
-    if(client.connected() == false){
-      digitalWrite(ServerPin,HIGH);
-      client.stop();
-      client.connect("prosismic.zeke.cl",80);
-      Serial.println(" Connected to Prosismc ");
+  if(client.connected() == false){
+    digitalWrite(ServerPin,HIGH);
+    client.stop();
+    client.connect("prosismic.zeke.cl",80);
+    Serial.println(" Connected to Prosismc ");
 
+  }
+  else {
+    if (client.available()) {
+      char c = client.read();
+      // Serial.write(c);
     }
-    else {
-      if (client.available()) {
-        char c = client.read();
-       // Serial.write(c);
-      }
-     digitalWrite(ServerPin,LOW);
-    }
+    digitalWrite(ServerPin,LOW);
+  }
 
 
   led_display();
@@ -576,9 +519,13 @@ void locationCallback(float lat, float lon, float accuracy) {
 
 bool reiniciando() {
 
-  Serial.print(" t_reset ");
-  Serial.print((RestartTime) - (Time.now()  - tc_reset));
-  Serial.print("(s) ");
+  time_t tiempo = (RestartTime) - (Time.now()  - tc_reset);
+
+  if(tiempo % 60 == 0){
+    Serial.print(" t_reset ");
+    Serial.print(tiempo / 60);
+    Serial.print("(min) ");
+  }
 
   if (( REINICIO == true ) && (X.size() >= SAMPLES)) {
 
@@ -630,159 +577,159 @@ bool reiniciando() {
 
   }  // fin del calculo de las referencias
 
-return false;
+  return false;
 }
 
 
-  // avisa cuando un evento no es notificado al servidor
-  int evento_sin_conexion() {
-    if (!CSERVER) {  // wait for server resend
-      Serial.print("Pause event for ");
-      Serial.print(SAMPLES / 2 - tc_cserver);
-      Serial.print(" ce_cserver");
+// avisa cuando un evento no es notificado al servidor
+int evento_sin_conexion() {
+  if (!CSERVER) {  // wait for server resend
+    Serial.print("Pause event for ");
+    Serial.print(SAMPLES / 2 - tc_cserver);
+    Serial.print(" ce_cserver");
+    Serial.print(" ");
+    tc_cserver++;
+
+    /* check server count complete */
+    if (tc_cserver >= SAMPLES / 2) {
+      tc_cserver = 0;
+      DATASEND = true;
+      CSERVER = true;
+    }
+    return 1;
+  }
+  return 0;
+}
+
+
+
+
+
+// revisa si hay eventos conseuctivos y detiene el envío de eventos en caso
+// afirmativo
+int control_de_eventos_consecutivos() {
+  if (EVENT) {  // pause after eventis detected
+
+    /* check if event count comp	// Initialize sensor
+       LIS3DHConfig config;
+       config.setAccelMode(LIS3DH::RATE_100_HZ);lete */
+    if (ce_event >= SAMPLES / 2) {
+      ce_event = 0;
+      DATASEND = true;
+      EVENT = false;
+    } else {
+      Serial.print("Pause for ");
+      Serial.print(SAMPLES / 2 - ce_event);
+      Serial.print(" ce_event");
       Serial.print(" ");
-      tc_cserver++;
-
-      /* check server count complete */
-      if (tc_cserver >= SAMPLES / 2) {
-        tc_cserver = 0;
-        DATASEND = true;
-        CSERVER = true;
-      }
-      return 1;
+      ce_event++;
     }
-    return 0;
+    return 1;
   }
+  return 0;
+}
 
 
 
 
 
-  // revisa si hay eventos conseuctivos y detiene el envío de eventos en caso
-  // afirmativo
-  int control_de_eventos_consecutivos() {
-    if (EVENT) {  // pause after eventis detected
+// revisa si hay desplazamiento del sensor
+int antidesplazamiento() {
+  if (DPCHECK == true) {
+    char dpline[100];
 
-      /* check if event count comp	// Initialize sensor
-         LIS3DHConfig config;
-         config.setAccelMode(LIS3DH::RATE_100_HZ);lete */
-      if (ce_event >= SAMPLES / 2) {
-        ce_event = 0;
-        DATASEND = true;
-        EVENT = false;
-      } else {
-        Serial.print("Pause event for ");
-        Serial.print(SAMPLES / 2 - ce_event);
-        Serial.print(" ce_event");
-        Serial.print(" ");
-        ce_event++;
+    if (tc_dpcheck <= DPTIME) {  // check 6000 count windwow
+      snprintf(dpline, sizeof(dpline),"PDEvent %d/3 in %4d count - ec1 %d ec2 %d", 
+          ce_dpcheck, DPTIME - tc_dpcheck, tc_temp1, tc_temp2);
+      Serial.print(dpline);
+      Serial.print(" ");
+
+
+      if (ce_dpcheck == 1) {
+        tc_temp1++;
       }
-      return 1;
-    }
-    return 0;
-  }
 
-
-
-
-
-  // revisa si hay desplazamiento del sensor
-  int antidesplazamiento() {
-    if (DPCHECK == true) {
-      char dpline[100];
-
-      if (tc_dpcheck <= DPTIME) {  // check 6000 count windwow
-        snprintf(dpline, sizeof(dpline),
-            "PDEvent %d/3 in %4d count - ec1 %d ec2 %3d", ce_dpcheck,
-            DPTIME - tc_dpcheck, tc_temp1, tc_temp2);
-        Serial.print(dpline);
-        Serial.print(" ");
-
-        if (ce_dpcheck == 1) {
-          tc_temp1++;
-        }
-
-        if (ce_dpcheck == 2) {
-          if (tc_temp1 >= 300) {
-            tc_temp2++;
-          } else {
-            tc_temp1 = 0;
-            ce_dpcheck = 1;
-          }
-        }
-
-        if (ce_dpcheck == 3) {
-          if (tc_temp2 >= 300) {
-            tc_dpcheck = 0;
-            ce_dpcheck = 0;
-            tc_dpchecktmp = 0;
-            DATASEND = false;
-            EVENT = false;
-            DPCHECK = false;
-            MCHECK = false;
-            Serial.print(" Pause event sending until offset");
-            Serial.print(" ");
-          } else {
-            tc_temp1 = 0;
-            tc_temp2 = 0;
-            ce_dpcheck = 1;
-          }
+      if (ce_dpcheck == 2) {
+        if (tc_temp1 >= 300) {
+          tc_temp2++;
+        } else {
+          tc_temp1 = 0;
+          ce_dpcheck = 1;
         }
       }
 
-      else {
-        tc_dpcheck = 0;
-        ce_dpcheck = 0;
-        tc_dpchecktmp = 0;
-        DPCHECK = false;
-      }
-
-      tc_dpcheck++;
-      return 1;
-    }
-    return 0;
-  }
-
-
-
-
-  // revisa si hay movimiento duerante muestras
-
-
-  int antimovimiento() {
-    char line[150];
-    if (MCHECK == true) {
-      if (tc_mcheck <= MTIME) {  // check 1500 count
-        snprintf(line, sizeof(line), "MEvent %d/5 in %d count", ce_mcheck,
-            (DPTIME - tc_mcheck));
-        Serial.print(line);
-        Serial.print(" ");
-        tc_mcheck++;
-
-        if (ce_mcheck >= 5) {  // are 5 event
+      if (ce_dpcheck == 3) {
+        if (tc_temp2 >= 300) {
+          tc_dpcheck = 0;
+          ce_dpcheck = 0;
+          tc_dpchecktmp = 0;
           DATASEND = false;
           EVENT = false;
-          MCHECK = false;
           DPCHECK = false;
-          ce_event = 0;  // ready for next eventsamples
-          Serial.print("Pause event sending until offset");
+          MCHECK = false;
+          Serial.print(" Pause event sending until offset");
           Serial.print(" ");
+        } else {
+          tc_temp1 = 0;
+          tc_temp2 = 0;
+          ce_dpcheck = 1;
         }
       }
-
-      else {
-        tc_mcheck = 0;
-        ce_mcheck = 0;
-        if (EVENT == false) MCHECK = false;
-      }
-      return 1;
     }
 
-    return 0;
+    else {
+      tc_dpcheck = 0;
+      ce_dpcheck = 0;
+      tc_dpchecktmp = 0;
+      DPCHECK = false;
+    }
+
+    tc_dpcheck++;
+    return 1;
+  }
+  return 0;
+}
+
+
+
+
+// revisa si hay movimiento duerante muestras
+
+
+int antimovimiento() {
+  char line[150];
+  if (MCHECK == true) {
+    if (tc_mcheck <= MTIME) {  // check 1500 count
+      snprintf(line, sizeof(line), "MEvent %d/5 in %d count", ce_mcheck,
+          (DPTIME - tc_mcheck));
+      Serial.print(line);
+      Serial.print(" ");
+      tc_mcheck++;
+
+      if (ce_mcheck >= 5) {  // are 5 event
+        DATASEND = false;
+        EVENT = false;
+        MCHECK = false;
+        DPCHECK = false;
+        ce_event = 0;  // ready for next eventsamples
+        Serial.print("Pause event sending until offset");
+        Serial.print(" ");
+      }
+    }
+
+    else {
+      tc_mcheck = 0;
+      ce_mcheck = 0;
+      if (EVENT == false) MCHECK = false;
+    }
+    return 1;
   }
 
-  // Calculo de las referencias según los valores maximos y mininmos de las
-  // _samples muestras}
+  return 0;
+}
+
+// Calculo de las referencias según los valores maximos y mininmos de las
+// _samples muestras}
 
 
 bool CalcRef(int _i, int _samples) {
@@ -841,10 +788,10 @@ bool CalcRef(int _i, int _samples) {
       Serial.print(_i);
       Serial.print(" count");
       /* Calculates de references each time for debug */
-	      IQRref = maxx(long(300), (IQRmax - IQRmin) * Factor_IQR);
-	      CAVref = maxx(long(500), (CAVmax - CAVmin) * Factor_CAV);
-	      ZCref = float((ZCmax + ZCmin) / 2) - float((ZCmax - ZCmin) * Factor_ZC);
-	      RSLref = maxx(155, (RSLmax - RSLmin) * Factor_RSL);
+      IQRref = maxx(long(300), (IQRmax - IQRmin) * Factor_IQR);
+      CAVref = maxx(long(500), (CAVmax - CAVmin) * Factor_CAV);
+      ZCref = float((ZCmax + ZCmin) / 2) - float((ZCmax - ZCmin) * Factor_ZC);
+      RSLref = maxx(155, (RSLmax - RSLmin) * Factor_RSL);
     }
 
 
@@ -914,9 +861,9 @@ int postRequestv2(time_t _time) {
       Serial.write(c);
     }
 
-    Serial.print(" t_send ");
-    Serial.print(millis()-_startcalc);
-    Serial.print("(ms) ");
+    //  Serial.print(" t_send ");
+    //  Serial.print(millis()-_startcalc);
+    //  Serial.print("(ms) ");
 
     return 1;
   }
@@ -1082,16 +1029,13 @@ int accSampling() {
   unsigned long _comienzo = millis();
   imu.read();
 
-  filterOneHighpassX.input(
-      imu.a.x /
-      16);  // update the one pole lowpass filter, and statistics pmcFilter
-  filterOneHighpassY.input(
-      imu.a.y /
-      16);  // update the one pole lowpass filter, and statistics pmcFilter
-  filterOneHighpassZ.input(
-      imu.a.z /
-      16);  // update the one pole lowpass filter, and statistics pmcFilter
+  //  filteronehighpassx.input( imu.a.x / 16);  // update the one pole lowpass filter, and statistics pmcfilter
+  //  filteronehighpassy.input(imu.a.y /16);  // update the one pole lowpass filter, and statistics pmcfilter
+  //  filteronehighpassz.input(imu.a.z /16);  // update the one pole lowpass filter, and statistics pmcfilter
 
+  filterOneHighpassX.input( imu.a.x * 0.061);  // update the one pole lowpass filter, and statistics pmcfilter
+  filterOneHighpassY.input( imu.a.y * 0.061);  // update the one pole lowpass filter, and statistics pmcfilter
+  filterOneHighpassZ.input( imu.a.z * 0.061);  // update the one pole lowpass filter, and statistics pmcfilter
 
   _x = 0.5 * (filterOneHighpassX.output()) + 0.5 * old_x;
   _y = 0.5 * (filterOneHighpassY.output()) + 0.5 * old_y;
@@ -1148,231 +1092,6 @@ void blinking_delay(int _delay) {
   digitalWrite(EventPin, LOW);
 }
 
-FilterOnePole::FilterOnePole(FILTER_TYPE ft, float fc, float initialValue) {
-  setFilter(ft, fc, initialValue);
-}
-
-void FilterOnePole::setFilter(FILTER_TYPE ft, float fc, float initialValue) {
-  FT = ft;
-  setFrequency(fc);
-
-  Y = initialValue;
-  Ylast = initialValue;
-  X = initialValue;
-
-  LastUS = micros();
-}
-
-float FilterOnePole::input(float inVal) {
-  long time = micros();
-  ElapsedUS = float(time - LastUS);  // cast to float here, for math
-  LastUS = time;                     // update this now
-
-  // shift the data values
-  Ylast = Y;
-  X = inVal;  // this is now the most recent input value
-
-  // filter value is controlled by a parameter called X
-  // tau is set by the user in microseconds, but must be converted to samples
-  // here
-  TauSamps = TauUS / ElapsedUS;
-
-  float ampFactor;
-#ifdef ARM_FLOAT
-  ampFactor = expf(-1.0 / TauSamps);  // this is 1 if called quickly
-#else
-  ampFactor = exp(-1.0 / TauSamps);  // this is 1 if called quickly
-#endif
-
-  Y = (1.0 - ampFactor) * X + ampFactor * Ylast;  // set the new value
-
-  return output();
-}
-
-void FilterOnePole::setFrequency(float newFrequency) {
-  setTau(1.0 / (TWO_PI * newFrequency));  // τ=1/ω
-}
-
-void FilterOnePole::setTau(float newTau) { TauUS = newTau * 1e6; }
-
-float FilterOnePole::output() {
-  // figure out which button to read
-  switch (FT) {
-    case LOWPASS:
-      // return the last value
-      return Y;
-      break;
-    case INTEGRATOR:
-      // using a lowpass, but normaize
-      return Y * (TauUS / 1.0e6);
-      break;
-    case HIGHPASS:
-      // highpass is the _difference_
-      return X - Y;
-      break;
-    case DIFFERENTIATOR:
-      // like a highpass, but normalize
-      return (X - Y) / (TauUS / 1.0e6);
-      break;
-    default:
-      // should never get to here, return 0 just in case
-      return 0;
-  }
-}
-
-void FilterOnePole::print() {
-  Serial.println("");
-  Serial.print(" Y: ");
-  Serial.print(Y);
-  Serial.print(" Ylast: ");
-  Serial.print(Ylast);
-  Serial.print(" X ");
-  Serial.print(X);
-  Serial.print(" ElapsedUS ");
-  Serial.print(ElapsedUS);
-  Serial.print(" TauSamps: ");
-  Serial.print(TauSamps);
-  // Serial.print(" ampFactor " );       Serial.print( ampFactor );
-  Serial.print(" TauUS: ");
-  Serial.print(TauUS);
-  Serial.println("");
-}
-
-void FilterOnePole::test() {
-  float tau = 10;
-  float updateInterval = 1;
-  float nextupdateTime = millis() * 1e-3;
-
-  float inputValue = 0;
-  FilterOnePole hp(HIGHPASS, tau, inputValue);
-  FilterOnePole lp(LOWPASS, tau, inputValue);
-
-  while (true) {
-    float now = millis() * 1e-3;
-
-    // switch input values on a 20 second cycle
-    if (round(now / 20.0) - (now / 20.0) < 0)
-      inputValue = 0;
-    else
-      inputValue = 100;
-
-    hp.input(inputValue);
-    lp.input(inputValue);
-
-    if (now > nextupdateTime) {
-      nextupdateTime += updateInterval;
-
-      Serial.print("inputValue: ");
-      Serial.print(inputValue);
-      Serial.print("\t high-passed: ");
-      Serial.print(hp.output());
-      Serial.print("\t low-passed: ");
-      Serial.print(lp.output());
-      Serial.println();
-    }
-  }
-}
-
-void FilterOnePole::setToNewValue(float newVal) { Y = Ylast = X = newVal; }
-
-// stuff for filter2 (lowpass only)
-// should be able to set a separate fall time as well
-FilterOnePoleCascade::FilterOnePoleCascade(float riseTime, float initialValue) {
-  setRiseTime(riseTime);
-  setToNewValue(initialValue);
-}
-
-void FilterOnePoleCascade::setRiseTime(float riseTime) {
-  float tauScale = 3.36;  // found emperically, by running test();
-
-  Pole1.setTau(riseTime / tauScale);
-  Pole2.setTau(riseTime / tauScale);
-}
-
-float FilterOnePoleCascade::input(float inVal) {
-  Pole2.input(Pole1.input(inVal));
-  return output();
-}
-
-// clears out the values in the filter
-void FilterOnePoleCascade::setToNewValue(float newVal) {
-  Pole1.setToNewValue(newVal);
-  Pole2.setToNewValue(newVal);
-}
-
-float FilterOnePoleCascade::output() { return Pole2.output(); }
-
-void FilterOnePoleCascade::test() {
-  // make a filter, how fast does it run:
-
-  float rise = 1.0;
-  FilterOnePoleCascade myFilter(rise);
-
-  // first, test the filter speed ...
-  long nLoops = 1000;
-
-  Serial.print("testing filter with a rise time of ");
-  Serial.print(rise);
-  Serial.print("s");
-
-  Serial.print("\n running filter speed loop ... ");
-
-  float startTime, stopTime;
-
-  startTime = millis() * 1e-3;
-  for (long i = 0; i < nLoops; ++i) {
-    myFilter.input(PI);  // use pi, so it will actually do a full calculation
-  }
-  stopTime = millis() * 1e-3;
-
-  Serial.print("done, filter runs at ");
-  Serial.print(float(nLoops) / (stopTime - startTime));
-  Serial.print(" hz ");
-  Serial.print("\n filter value: ");
-  Serial.print(myFilter.output());
-
-  myFilter.setToNewValue(0.0);
-  Serial.print("\n after reset to 0: ");
-  Serial.print(myFilter.output());
-
-  Serial.print("\n testing rise time (10% to 90%) ...");
-
-  bool crossedTenPercent = false;
-  while (myFilter.output() < 0.9) {
-    myFilter.input(1.0);
-    if (myFilter.output() > 0.1 && !crossedTenPercent) {
-      // filter first crossed the 10% point
-      startTime = millis() * 1e-3;
-      crossedTenPercent = true;
-    }
-  }
-  stopTime = millis() * 1e-3;
-
-  Serial.print("done, rise time: ");
-  Serial.print(stopTime - startTime);
-
-  Serial.print("testing attenuation at f = 1/risetime");
-
-  myFilter.setToNewValue(0.0);
-
-  float maxVal = 0;
-  float valWasOutputThisCycle = true;
-
-  while (true) {
-    float now = 1e-3 * millis();
-
-    float currentFilterVal = myFilter.input(sin(TWO_PI * now));
-
-    if (currentFilterVal < 0.0) {
-      if (!valWasOutputThisCycle) {
-        // just crossed below zero, output the max
-        Serial.print(maxVal * 100);
-        Serial.print(" %\n");
-        valWasOutputThisCycle = true;
-      }
-    }
-  }
-}
 
 int setZC(String _zc){
   ZCref = _zc.toInt();
