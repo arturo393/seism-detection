@@ -1,35 +1,138 @@
-# q_up
+# Seismic Detection v2 (Particle Photon)
 
-A Particle project named q_up
+Sistema de detección de sismos basado en Particle Photon con acelerómetro MinIMU-V5.
 
-## Welcome to your project!
+## 📋 Descripción
 
-Every new Particle project is composed of 3 important elements that you'll see have been created in your project directory for q_up.
+Esta es la **Versión 2** del sistema de detección sísmica, que utiliza la plataforma Particle Photon para mejorar la conectividad y permitir configuración remota a través de Particle Cloud.
 
-#### ```/src``` folder:  
-This is the source folder that contains the firmware files for your project. It should *not* be renamed. 
-Anything that is in this folder when you compile your project will be sent to our compile service and compiled into a firmware binary for the Particle device that you have targeted.
+### Características principales
+- **Microcontrolador**: Particle Photon
+- **Acelerómetro**: MinIMU-V5 con sensor LIS3MDL
+- **Conectividad**: WiFi con Particle Cloud
+- **Configuración remota**: Parámetros ajustables vía cloud
+- **Georeferenciación**: Google Maps Device Locator
+- **Frecuencia de muestreo**: 100 Hz configurable
 
-If your application contains multiple files, they should all be included in the `src` folder. If your firmware depends on Particle libraries, those dependencies are specified in the `project.properties` file referenced below.
+## 🛠️ Instalación
 
-#### ```.ino``` file:
-This file is the firmware that will run as the primary application on your Particle device. It contains a `setup()` and `loop()` function, and can be written in Wiring or C/C++. For more information about using the Particle firmware API to create firmware for your Particle device, refer to the [Firmware Reference](https://docs.particle.io/reference/firmware/) section of the Particle documentation.
+### Prerrequisitos
+```bash
+# Instalar Particle CLI
+npm install -g particle-cli
 
-#### ```project.properties``` file:  
-This is the file that specifies the name and version number of the libraries that your project depends on. Dependencies are added automatically to your `project.properties` file when you add a library to a project using the `particle library add` command in the CLI or add a library in the Desktop IDE.
+# Iniciar sesión
+particle login
+```
 
-## Adding additional files to your project
+### Compilación
+```bash
+# Compilar para Photon
+particle compile photon
 
-#### Projects with multiple sources
-If you would like add additional files to your application, they should be added to the `/src` folder. All files in the `/src` folder will be sent to the Particle Cloud to produce a compiled binary.
+# Flashear al dispositivo
+particle flash [device_name] firmware.bin
+```
 
-#### Projects with external libraries
-If your project includes a library that has not been registered in the Particle libraries system, you should create a new folder named `/lib/<libraryname>/src` under `/<project dir>` and add the `.h` and `.cpp` files for your library there. All contents of the `/lib` folder and subfolders will also be sent to the Cloud for compilation.
+## ⚙️ Configuración
 
-## Compiling your project
+### Variables Cloud Disponibles
+- `ZCref`: Umbral de cruces por cero
+- `IQRref`: Umbral del rango intercuartílico  
+- `CAVref`: Umbral del vector acelerativo acumulativo
+- `RSLref`: Umbral de relación de señal
+- `Latitude`: Latitud del dispositivo
+- `Longitude`: Longitud del dispositivo
 
-When you're ready to compile your project, make sure you have the correct Particle device target selected and run `particle compile <platform>` in the CLI or click the Compile button in the Desktop IDE. The following files in your project folder will be sent to the compile service:
+### Funciones Cloud Disponibles
+- `setZC(value)`: Configurar umbral ZC
+- `setIQR(value)`: Configurar umbral IQR
+- `setCAV(value)`: Configurar umbral CAV
+- `setRSL(value)`: Configurar umbral RSL
+- `setReferencia(mode)`: Activar/desactivar referencias variables
+- `setRestartTime(minutes)`: Configurar tiempo de reinicio
+- `setOnlineTime(minutes)`: Configurar tiempo online
 
-- Everything in the `/src` folder, including your `.ino` application file
-- The `project.properties` file for your project
-- Any libraries stored under `lib/<libraryname>/src`
+## 🔧 Estructura del Proyecto
+
+#### `/src` folder
+Contiene el firmware principal del proyecto. El archivo `q_up.ino` implementa:
+- Algoritmo de detección sísmica
+- Comunicación con Particle Cloud
+- Gestión de sensores LSM6
+- Sistema de georeferenciación
+
+#### `project.properties` file
+Especifica las dependencias de librerías del proyecto:
+- LSM6: Comunicación con acelerómetro
+- HttpClient: Comunicación HTTP
+- google-maps-device-locator: Georeferenciación
+
+#### `/lib` folder
+Librerías específicas del proyecto:
+- **Filters**: Filtros digitales para procesamiento de señales
+- **HttpClient**: Cliente HTTP para Particle
+- **LSM6**: Driver para acelerómetro MinIMU-V5
+
+## 📊 Parámetros de Detección
+
+El sistema utiliza cuatro parámetros principales:
+
+| Parámetro | Descripción | Unidad |
+|-----------|-------------|---------|
+| **IQR** | Rango Intercuartílico | mg |
+| **CAV** | Vector Acelerativo Acumulativo | mg |
+| **RSL** | Relación de Señal | % |
+| **ZC** | Cruces por Cero | count |
+
+## 🚀 Uso
+
+### Monitoreo en Tiempo Real
+```bash
+# Ver logs del dispositivo
+particle serial monitor
+
+# Ver variables cloud
+particle get [device_name] ZCref
+particle get [device_name] IQRref
+```
+
+### Configuración Remota
+```bash
+# Configurar umbrales
+particle call [device_name] setIQR "500"
+particle call [device_name] setCAV "1000"
+
+# Configurar tiempos
+particle call [device_name] setRestartTime "10"
+```
+
+## 📈 Salida de Datos
+
+El sistema publica eventos al Particle Cloud cuando detecta actividad sísmica:
+
+**Evento**: `Sismo`  
+**Formato**: `tiempo;aceleración_max;trigger;ZC;IQR;CAV;RSL;latitud;longitud`
+
+## 🔄 Diferencias con Versión 1
+
+| Aspecto | Versión 1 (ESP8266) | Versión 2 (Photon) |
+|---------|---------------------|---------------------|
+| Microcontrolador | NodeMCU ESP8266 | Particle Photon |
+| Acelerómetro | Múltiples (MMA8452Q, LSM303, ADXL345) | MinIMU-V5 (LIS3MDL) |
+| Configuración | Hardcoded | Remota vía Cloud |
+| Conectividad | WiFi directo | Particle Cloud |
+| Georeferenciación | WiFi Location | Google Maps API |
+
+## 📝 Desarrollo
+
+Para agregar archivos adicionales al proyecto, colócalos en la carpeta `/src`. Para librerías externas, crea `/lib/<nombre_libreria>/src` y coloca los archivos `.h` y `.cpp` ahí.
+
+Los archivos que se envían al servicio de compilación incluyen:
+- Todo en la carpeta `/src`
+- El archivo `project.properties`
+- Cualquier librería en `lib/<nombre_libreria>/src`
+
+---
+
+Para más información sobre el proyecto completo, consulta el [README principal](../README.md).
