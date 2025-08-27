@@ -1,6 +1,121 @@
+# Sistema de Detección de Sismos - .gitignore
+
+# ===== COMPILACIÓN Y BUILD =====
+# Arduino
+*.hex
+*.elf
+*.map
+*.lss
+*.sym
+*.tmp
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+lib_deps/
+
+# Particle
+target/
+*.bin
+photon_firmware_*.bin
+electron_firmware_*.bin
+
+# ===== DESARROLLO =====
+# Archivos temporales
+*~
+*.swp
+*.swo
+*.tmp
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ===== DATOS Y LOGS =====
+# Archivos de datos
+data/*.csv
+data/*.txt
+*.log
+
+# Configuración local
+config_local.json
+secrets.h
+credentials.h
+
+# ===== DEPENDENCIAS =====
+# Node modules (si se usan herramientas Node.js)
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+
+# ===== SISTEMA =====
+# Archivos del sistema
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ===== HARDWARE Y DISEÑO =====
+# Backup de archivos CAD
+*.bak
+*.dxf~
+*.*~
+
+# ===== TESTING =====
+# Archivos de test
+test_results/
+coverage/
+
+# ===== DOCUMENTACIÓN =====
+# Archivos generados de documentación
+docs/_build/
+*.pdf.tmp
+
+# ===== CONFIGURACIÓN ESPECÍFICA =====
+# Credenciales WiFi (mantener seguridad)
+wifi_config.h
+network_credentials.h
+
+# IDs de dispositivos específicos
+device_config.h
+
+# ===== PERMITIR ARCHIVOS IMPORTANTES =====
+# Asegurar que estos archivos importantes se incluyan
+!README.md
+!LICENSE
+!CONTRIBUTING.md
+!CHANGELOG.md
+!CODE_IMPROVEMENTS.md
+
+# Ejemplos importantes
+!*/examples/**
+!lib/*/examples/**
+
+# Configuración de proyecto
+!project.properties
+!platformio.ini
+!library.json
+
+# Archivos existentes a mantener
 *.s$*
 *.b$*
 *.pro
 *.job
 data
-*.log
